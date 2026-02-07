@@ -10,7 +10,7 @@ import 'package:path_provider/path_provider.dart';
 
 class DBHandler {
   static Database? _database;
-  static const String _apiBaseUrl = 'http://182.70.117.46:4201/api';
+  static const String _apiBaseUrl = 'http://192.168.10.12:4201/api';
 
   static Future<void> initDB({Function(int progress)? onProgress}) async {
     try {
