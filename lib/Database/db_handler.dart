@@ -61,7 +61,7 @@ class DBHandler {
       );
       onProgress?.call(80);
 
-      await logininsert();
+      await loginInsert();
       onProgress?.call(100);
     } catch (e) {
       debugPrint('Database initialization failed: $e');
@@ -102,6 +102,7 @@ class DBHandler {
     flag INTEGER DEFAULT 0
   );
   ''',
+      'CREATE INDEX IF NOT EXISTS idx_ptl_ptid ON productiontomagazine_loading(production_transfer_id);',
 
       // Magazine stock transfer table
       '''
@@ -121,6 +122,7 @@ class DBHandler {
       truck_no TEXT
     );
     ''',
+      'CREATE INDEX IF NOT EXISTS idx_mst_transfer_id ON magzinestocktransfer(transfer_id);',
 
       // Scanned box table with foreign key
       '''
@@ -131,6 +133,7 @@ class DBHandler {
       FOREIGN KEY (magzinestocktransfer_id) REFERENCES magzinestocktransfer(id) ON DELETE CASCADE
     );
     ''',
+      'CREATE INDEX IF NOT EXISTS idx_sb_mst_id ON scannedbox(magzinestocktransfer_id);',
 
       // Loading sheet table
       '''
@@ -152,6 +155,8 @@ class DBHandler {
     UNIQUE (loadingno, indentno, bid, pcode, typeoofdispatc, magzine)
   );
   ''',
+      'CREATE INDEX IF NOT EXISTS idx_ls_loadingno ON loadingsheet(loadingno);',
+      'CREATE INDEX IF NOT EXISTS idx_ls_complete ON loadingsheet(complete_flag);',
 
       // Loading cases table
       '''
@@ -162,6 +167,7 @@ class DBHandler {
       FOREIGN KEY (loadingsheet_id) REFERENCES loadingsheet(id) ON DELETE CASCADE
     );
     ''',
+      'CREATE INDEX IF NOT EXISTS idx_lc_ls_id ON loadingcases(loadingsheet_id);',
 
       // loadingsheet batch table
       '''
@@ -175,66 +181,47 @@ class DBHandler {
         FOREIGN KEY (loadingsheet_id) REFERENCES loadingsheet(id) ON DELETE CASCADE
       );
       ''',
+      'CREATE INDEX IF NOT EXISTS idx_lsb_ls_id ON loadingsheetbatch(loadingsheet_id);',
     ];
 
     for (int i = 0; i < tables.length; i++) {
       await db.execute(tables[i]);
-      debugPrint('Table ${i + 1} created successfully');
-      onProgress?.call(30 + ((i + 1) * 10));
+      // Slightly roughly estimate progress
+      onProgress?.call(30 + ((i + 1) * 5));
     }
   }
 
   // Request storage permission with Android 12+ support
+  // Request storage permission with Android 12+ support
   static Future<void> _requestStoragePermission() async {
-    // For Android 12+, we use a more granular approach
-    if (Platform.isAndroid) {
-      // Check if we're on Android 10 or higher (scoped storage)
-      final androidInfo = await DeviceInfoPlugin().androidInfo;
-      final sdkInt = androidInfo.version.sdkInt;
-
-      if (sdkInt >= 30) {
-        // Android 11+
-        // For Android 11+, check MANAGE_EXTERNAL_STORAGE for broad access
-        if (await Permission.manageExternalStorage.isGranted) return;
-
-        // Request MANAGE_EXTERNAL_STORAGE permission
-        final status = await Permission.manageExternalStorage.request();
-        if (!status.isGranted) {
-          // Fallback to scoped storage approach using path_provider
-          return;
-        }
-      } else if (sdkInt >= 29) {
-        // Android 10
-        // For Android 10, check storage permission
-        if (await Permission.storage.isGranted) return;
-
-        final status = await Permission.storage.request();
-        if (!status.isGranted) {
-          throw Exception('Storage permission denied');
-        }
-      } else {
-        // Android 9 and below
-        // Legacy approach
-        if (await Permission.storage.isGranted) return;
-
-        final status = await Permission.storage.request();
-        if (!status.isGranted) {
-          throw Exception('Storage permission denied');
-        }
-      }
-    } else {
-      // For non-Android platforms
+    if (!Platform.isAndroid) {
       if (await Permission.storage.isGranted) return;
+      if (!await Permission.storage.request().isGranted) {
+        throw Exception('Storage permission denied');
+      }
+      return;
+    }
 
-      final status = await Permission.storage.request();
-      if (!status.isGranted) {
+    final androidInfo = await DeviceInfoPlugin().androidInfo;
+    final sdkInt = androidInfo.version.sdkInt;
+
+    if (sdkInt >= 30) {
+      // Android 11+
+      if (!await Permission.manageExternalStorage.isGranted) {
+        await Permission.manageExternalStorage.request();
+      }
+      // Note: If denied, we fall back to app-specific storage which doesn't need permission
+    } else {
+      // Android 10 and below
+      if (await Permission.storage.isGranted) return;
+      if (!await Permission.storage.request().isGranted) {
         throw Exception('Storage permission denied');
       }
     }
   }
 
 // Insert login details from API into local database
-  static Future<void> logininsert() async {
+  static Future<void> loginInsert() async {
     try {
       final response = await http.get(
         Uri.parse('$_apiBaseUrl/DownloadUploadData/GetLoginDetails'),
@@ -259,25 +246,27 @@ class DBHandler {
         int insertedCount = 0;
         int skippedCount = 0;
 
+        final batch = db.batch();
+
         for (var user in users) {
           final username = user['username'] as String;
 
           // Only insert if username doesn't exist
           if (!existingUsernames.contains(username)) {
-            await db.insert(
+            batch.insert(
               'user',
               {
                 'username': username,
                 'password': user['password'],
               },
-              conflictAlgorithm:
-                  ConflictAlgorithm.ignore, // Changed to ignore conflicts
+              conflictAlgorithm: ConflictAlgorithm.ignore,
             );
             insertedCount++;
           } else {
             skippedCount++;
           }
         }
+        await batch.commit(noResult: true);
 
         debugPrint(
             'User sync completed: $insertedCount new users inserted, $skippedCount existing users skipped');
@@ -383,7 +372,7 @@ class DBHandler {
   }
 
   /// Sync magazine transfer data with API
-  static Future<void> downlaodMagzineAllotedData() async {
+  static Future<void> downloadMagzineAllottedData() async {
     try {
       // Fetch data from API
       final response = await http.get(
@@ -403,9 +392,15 @@ class DBHandler {
         final productionTransferCases = List<Map<String, dynamic>>.from(
             responseData['data']['productionTransferCases']);
         // Save productionTransferCases data
-        await downlaodProductionTransferCases(productionTransferCases);
+        await downloadProductionTransferCases(productionTransferCases);
         // Save data to local database
         await _database!.transaction((txn) async {
+          // Note: Cannot easily batch mixed queries and inserts with conditional logic
+          // But we can optimize by batching inserts if we pre-validated.
+          // For now, keeping the logic but using batch for cleaner code if possible?
+          // The logic requires checking existence for EACH item.
+          // Optimization: Prepare statement or keep as is.
+          // Keeping as is to ensure correctness of "upsert" logic without unique constraint.
           for (var transfer in transferData) {
             // Check if record already exists
             final existingRecord = await txn.query(
@@ -454,7 +449,7 @@ class DBHandler {
   }
 
   // Sync production transfer data with API
-  static Future<void> SyncProductionScannedBox() async {
+  static Future<void> syncProductionScannedBox() async {
     final transferData = await fetchAllTransferData();
     final syncedTransIds = <int>{};
     final groupedData = <String, Map<String, dynamic>>{};
@@ -493,18 +488,20 @@ class DBHandler {
       }
 
       await _database!.transaction((txn) async {
+        final batch = txn.batch();
         for (int transId in syncedTransIds) {
-          await txn.delete(
+          batch.delete(
             'production_transfer',
             where: 'id = ?',
             whereArgs: [transId],
           );
-          await txn.delete(
+          batch.delete(
             'productiontomagazine_loading',
             where: 'production_transfer_id =?',
             whereArgs: [transId],
           );
         }
+        await batch.commit(noResult: true);
       });
     }
   }
@@ -564,6 +561,7 @@ class DBHandler {
     }
 
     await db.transaction((txn) async {
+      final batch = txn.batch();
       for (var loadingSheet in dispatchData) {
         final loadingNo = loadingSheet['loadingSheetNo'];
         final truckNo = loadingSheet['truckNo'];
@@ -572,7 +570,7 @@ class DBHandler {
         if (loadingSheet['indentDetails'] != null) {
           for (var item in loadingSheet['indentDetails']) {
             if (item['iscompleted'] == 0) {
-              await txn.insert(
+              batch.insert(
                 'loadingsheet',
                 {
                   'loadingno': loadingNo,
@@ -595,6 +593,7 @@ class DBHandler {
           }
         }
       }
+      await batch.commit(noResult: true);
     });
   }
 
@@ -671,37 +670,23 @@ class DBHandler {
           throw Exception('Failed to sync scanned box data: ${response.body}');
         }
 
-        // Clear synced data
+        // Clear synced data efficiently
         await _database!.transaction((txn) async {
-          for (var data in apiData) {
-            final transferId = data['transferId'];
-            final result = await txn.query(
-              'magzinestocktransfer',
-              columns: ['id'],
-              where: 'transfer_id = ?',
-              whereArgs: [transferId],
-            );
-
-            if (result.isNotEmpty) {
-              final id = result.first['id'] as int;
-              await txn.delete(
-                'scannedbox',
-                where: 'magzinestocktransfer_id = ?',
-                whereArgs: [id],
-              );
-              // Then delete the transfer record
-              await txn.delete(
-                'magzinestocktransfer',
-                where: 'id = ?',
-                whereArgs: [id],
-              );
-              await txn.delete(
-                'productiontomagazine_loading',
-                where: 'flag = ?',
-                whereArgs: [1],
-              );
-            }
+          final batch = txn.batch();
+          // Delete grouped items by magazine transfer ID locally
+          for (var id in groupedData.keys) {
+            batch.delete('scannedbox',
+                where: 'magzinestocktransfer_id = ?', whereArgs: [id]);
+            batch.delete('magzinestocktransfer',
+                where: 'id = ?', whereArgs: [id]);
           }
+          // Cleanup flags
+          batch.delete(
+            'productiontomagazine_loading',
+            where: 'flag = ?',
+            whereArgs: [1],
+          );
+          await batch.commit(noResult: true);
         });
       }
     } catch (e) {
@@ -744,15 +729,15 @@ class DBHandler {
         // Step 4: Download magazine transfer data (20% weight)
         onProgress?.call(0.7, 'Downloading magazine allocations...');
         await _executeWithRetry(
-          () => downlaodMagzineAllotedData(),
-          operationName: 'downlaodMagzineAllotedData',
+          () => downloadMagzineAllottedData(),
+          operationName: 'downloadMagzineAllottedData',
         );
 
         // Step 5: Sync production scanned boxes (20% weight)
         onProgress?.call(0.9, 'Syncing production transfers...');
         await _executeWithRetry(
-          () => SyncProductionScannedBox(),
-          operationName: 'SyncProductionScannedBox',
+          () => syncProductionScannedBox(),
+          operationName: 'syncProductionScannedBox',
         );
 
         onProgress?.call(1.0, 'Synchronization completed successfully!');
@@ -959,21 +944,23 @@ class DBHandler {
 
         // Delete synced data from local database
         await db.transaction((txn) async {
+          final batch = txn.batch();
           for (var sheet in completedSheets) {
             final loadingSheetId = sheet['id'] as int;
             // Delete associated loading cases first
-            await txn.delete(
+            batch.delete(
               'loadingcases',
               where: 'loadingsheet_id = ?',
               whereArgs: [loadingSheetId],
             );
             // Then delete the loading sheet record
-            await txn.delete(
+            batch.delete(
               'loadingsheet',
               where: 'id = ?',
               whereArgs: [loadingSheetId],
             );
           }
+          await batch.commit(noResult: true);
         });
         debugPrint(
             'Synced completed loading sheets data deleted from local DB.');
@@ -1005,12 +992,13 @@ class DBHandler {
     return result;
   }
 
-  static Future<void> downlaodProductionTransferCases(
+  static Future<void> downloadProductionTransferCases(
       List<dynamic> productionTransferCases) async {
     try {
       await _database!.transaction((txn) async {
+        final batch = txn.batch();
         for (var transferCase in productionTransferCases) {
-          await txn.insert(
+          batch.insert(
             'productiontomagazine_loading',
             {
               'production_transfer_id': transferCase['productionTransferId'],
@@ -1020,6 +1008,7 @@ class DBHandler {
             conflictAlgorithm: ConflictAlgorithm.ignore,
           );
         }
+        await batch.commit(noResult: true);
       });
     } catch (e) {
       throw Exception('Failed to save production transfer cases: $e');
