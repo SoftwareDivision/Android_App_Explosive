@@ -1,7 +1,8 @@
 import 'package:explosive_android_app/MagzineLoad/MagzineL1Scan.dart';
 import 'package:flutter/material.dart';
-import 'package:getwidget/getwidget.dart';
 import 'package:explosive_android_app/Database/db_handler.dart';
+import 'package:explosive_android_app/core/app_theme.dart';
+import 'package:explosive_android_app/core/widgets.dart';
 
 class MagzineLoadIndex extends StatefulWidget {
   const MagzineLoadIndex({super.key});
@@ -34,18 +35,18 @@ class _MagzineLoadIndexState extends State<MagzineLoadIndex> {
 
   @override
   void dispose() {
-    // Clean up the controllers and focus nodes when the widget is disposed
     _magazineController.dispose();
     _magazineFocusNode.dispose();
     super.dispose();
   }
 
+  // ============ BUSINESS LOGIC (PRESERVED) ============
   Future<void> _fetchLoadingNumbers() async {
     try {
       final magazineNo = _magazineController.text.trim();
       if (magazineNo.isEmpty) {
         setState(() {
-          _errorMessage = 'Please scan both Magazine Number.';
+          _errorMessage = 'Please scan Magazine Number.';
           _loadingNumbers = [];
         });
         return;
@@ -60,7 +61,9 @@ class _MagzineLoadIndexState extends State<MagzineLoadIndex> {
             .toList();
         if (_loadingNumbers.isNotEmpty) {
           _selectedLoadingNumber = _loadingNumbers.first;
-          _fetchLoadingSheets(); // Fetch details for the first loading number
+          _fetchLoadingSheets();
+        } else {
+          _errorMessage = 'No loading sheets found for this magazine.';
         }
       });
     } catch (e) {
@@ -71,12 +74,11 @@ class _MagzineLoadIndexState extends State<MagzineLoadIndex> {
     }
   }
 
-  // Function to fetch loading sheets from the database
   Future<void> _fetchLoadingSheets() async {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
-      _loadingSheets = []; // Clear previous data
+      _loadingSheets = [];
     });
 
     final magazineNo = _magazineController.text.trim();
@@ -84,15 +86,13 @@ class _MagzineLoadIndexState extends State<MagzineLoadIndex> {
 
     if (magazineNo.isEmpty || loadingSheetNo == null) {
       setState(() {
-        _errorMessage =
-            'Please scan both Magazine Number and Loading Sheet Number.';
+        _errorMessage = 'Please scan Magazine Number and select Loading Sheet.';
         _isLoading = false;
       });
       return;
     }
 
     try {
-      // Fetch loading sheets based on scanned magazine and loading sheet numbers
       final data = await DBHandler.fetchLoadingSheetByLoadingNoAndMagazine(
           loadingSheetNo, magazineNo);
       setState(() {
@@ -108,184 +108,531 @@ class _MagzineLoadIndexState extends State<MagzineLoadIndex> {
     }
   }
 
-  // Function to handle card tap and navigate to L1BoxScanPage
   void _navigateToL1Scan(Map<String, dynamic> loadingSheetData) async {
-    // Made async
-    // Navigate to the L1BoxScanPage, passing the selected loading sheet data
     await Navigator.push(
-      // Await the navigation
       context,
       MaterialPageRoute(
         builder: (context) => L1BoxScanPage(loadingSheetData: loadingSheetData),
       ),
     );
-    // This code runs when returning from L1BoxScanPage
-    _fetchLoadingSheets(); // Re-fetch data to update the list
+    _fetchLoadingSheets();
+  }
+  // ============ END BUSINESS LOGIC ============
+
+  void _resetSelection() {
+    _magazineController.clear();
+    setState(() {
+      _loadingSheets = [];
+      _loadingNumbers = [];
+      _selectedLoadingNumber = null;
+      _errorMessage = null;
+    });
+    FocusScope.of(context).requestFocus(_magazineFocusNode);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: GFAppBar(
-        title: const Text('Magazine Loading'),
-        backgroundColor: Colors.blue[600],
+      resizeToAvoidBottomInset: true,
+      appBar: CustomAppBar(
+        title: 'Magazine Loading',
+        backgroundColor: AppTheme.moduleMagazine,
         actions: [
           IconButton(
-            icon: const Icon(Icons.restore),
-            onPressed: () {
-              _magazineController.clear();
-              setState(() {
-                _loadingSheets = [];
-                _loadingNumbers = [];
-                _errorMessage = null;
-              });
-              FocusScope.of(context).requestFocus(_magazineFocusNode);
-            },
+            icon: const Icon(Icons.refresh_rounded, color: Colors.white),
+            tooltip: 'Reset',
+            onPressed: _resetSelection,
           ),
         ],
       ),
-      body: Container(
-        // Wrap the body in a Container to add a background image
-        decoration: const BoxDecoration(
-          image: DecorationImage(
-            image: AssetImage(
-                'assets/images/pexels-hngstrm-1939485.jpg'), // Your background image
-            fit: BoxFit.cover, // Cover the entire background
-          ),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(5.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // Input for Magazine Number
-              Card(
-                elevation: 2, // Add elevation for a card effect
-                child: Padding(
-                  padding: const EdgeInsets.all(
-                      8.0), // Add some padding inside the card
-                  child: TextField(
-                    // Reverted to just TextField
-                    controller: _magazineController,
-                    focusNode: _magazineFocusNode,
-                    decoration: InputDecoration(
-                      hintText: 'Scan Magazine Number',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                    onSubmitted: (value) {
-                      _fetchLoadingNumbers();
-                    },
-                    keyboardType: TextInputType.number,
-                    textInputAction: TextInputAction.next,
-                  ),
-                ),
-              ),
+      body: GradientBackground(
+        child: SafeArea(
+          child: Padding(
+            padding: AppTheme.paddingMD,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Magazine Scan Card
+                _buildMagazineScanCard(),
+                const SizedBox(height: AppTheme.spaceMD),
 
-              // Input for Loading Sheet Number
-              Card(
-                elevation: 2,
-                child: Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: DropdownButtonFormField<String>(
-                    value: _selectedLoadingNumber,
-                    decoration: InputDecoration(
-                      hintText: 'Select Loading Sheet Number',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                    items: _loadingNumbers.map((String value) {
-                      return DropdownMenuItem<String>(
-                        value: value,
-                        child: Text(value),
-                      );
-                    }).toList(),
-                    onChanged: (String? newValue) {
-                      setState(() {
-                        _selectedLoadingNumber = newValue;
-                      });
-                      if (newValue != null) {
-                        _fetchLoadingSheets();
-                      }
-                    },
-                  ),
-                ),
-              ),
+                // Loading Sheet Dropdown (only visible after magazine scan)
+                if (_loadingNumbers.isNotEmpty) ...[
+                  _buildLoadingSheetDropdown(),
+                  const SizedBox(height: AppTheme.spaceMD),
+                ],
 
-              // Display Loading Sheets or loading/error state
-              Expanded(
-                child: _isLoading
-                    ? const Center(child: CircularProgressIndicator())
-                    : _errorMessage != null
-                        ? Center(child: Text(_errorMessage!))
-                        : _loadingSheets.isEmpty
-                            ? const Center(
-                                child: Text('No loading sheets found.'),
-                              )
-                            : ListView.builder(
-                                itemCount: _loadingSheets.length,
-                                itemBuilder: (context, index) {
-                                  final sheet = _loadingSheets[index];
-                                  // Check if the sheet is completed
-                                  final isCompleted =
-                                      sheet['complete_flag'] == 1;
-                                  return Card(
-                                    elevation: 2,
-                                    color: isCompleted
-                                        ? Colors.green[100]
-                                        : null, // Highlight completed sheets
-                                    child: InkWell(
-                                      // Make the card tappable
-                                      onTap: isCompleted
-                                          ? null
-                                          : () => _navigateToL1Scan(
-                                              sheet), // Disable tap if completed
-                                      child: Padding(
-                                        padding: const EdgeInsets.all(12.0),
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              'Loading No: ${sheet['loadingno'] ?? 'N/A'}',
-                                              style: const TextStyle(
-                                                  fontWeight: FontWeight.bold),
-                                            ),
-                                            Text(
-                                                'Indent No: ${sheet['indentno'] ?? 'N/A'}'),
-                                            Text(
-                                                'Truck No: ${sheet['truckno'] ?? 'N/A'}'),
-                                            Text(
-                                                'T Name: ${sheet['tname'] ?? 'N/A'}'),
-                                            Text(
-                                                'B Name: ${sheet['bname'] ?? 'N/A'}'),
-                                            Text(
-                                                'Product: ${sheet['product'] ?? 'N/A'}'),
-                                            Text(
-                                                'Cases: ${sheet['laodcases'] ?? 'N/A'}'),
-                                            Text(
-                                              'Status: ${isCompleted ? 'Completed' : 'Pending'}',
-                                              style: TextStyle(
-                                                color: isCompleted
-                                                    ? Colors.green[700]
-                                                    : Colors.orange[700],
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                  );
-                                },
-                              ),
-              ),
-            ],
+                // Stats Row
+                if (_loadingSheets.isNotEmpty) ...[
+                  _buildStatsRow(),
+                  const SizedBox(height: AppTheme.spaceMD),
+                ],
+
+                // Loading Sheets List
+                Expanded(
+                  child: _buildContentArea(),
+                ),
+              ],
+            ),
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildMagazineScanCard() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: AppTheme.borderRadiusMD,
+        boxShadow: AppTheme.shadowMD,
+      ),
+      child: Padding(
+        padding: AppTheme.paddingLG,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: AppTheme.paddingSM,
+                  decoration: BoxDecoration(
+                    color: AppTheme.moduleMagazine.withOpacity(0.1),
+                    borderRadius: AppTheme.borderRadiusSM,
+                  ),
+                  child: Icon(
+                    Icons.warehouse_rounded,
+                    color: AppTheme.moduleMagazine,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: AppTheme.spaceMD),
+                Text(
+                  'Scan Magazine',
+                  style: AppTheme.titleMedium,
+                ),
+              ],
+            ),
+            const SizedBox(height: AppTheme.spaceMD),
+            TextField(
+              controller: _magazineController,
+              focusNode: _magazineFocusNode,
+              style: AppTheme.bodyMedium,
+              decoration: InputDecoration(
+                hintText: 'Scan Magazine Number',
+                prefixIcon: const Icon(Icons.qr_code_scanner),
+                filled: true,
+                fillColor: AppTheme.surfaceVariant,
+                border: OutlineInputBorder(
+                  borderRadius: AppTheme.borderRadiusMD,
+                  borderSide: BorderSide.none,
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: AppTheme.borderRadiusMD,
+                  borderSide:
+                      BorderSide(color: AppTheme.backgroundAlt, width: 1.5),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: AppTheme.borderRadiusMD,
+                  borderSide:
+                      BorderSide(color: AppTheme.moduleMagazine, width: 2),
+                ),
+                contentPadding: AppTheme.paddingMD,
+              ),
+              onSubmitted: (value) {
+                _fetchLoadingNumbers();
+              },
+              keyboardType: TextInputType.number,
+              textInputAction: TextInputAction.next,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLoadingSheetDropdown() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: AppTheme.borderRadiusMD,
+        boxShadow: AppTheme.shadowSM,
+      ),
+      child: Padding(
+        padding: AppTheme.paddingLG,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: AppTheme.paddingSM,
+                  decoration: BoxDecoration(
+                    color: AppTheme.primary.withOpacity(0.1),
+                    borderRadius: AppTheme.borderRadiusSM,
+                  ),
+                  child: const Icon(
+                    Icons.assignment_rounded,
+                    color: AppTheme.primary,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: AppTheme.spaceMD),
+                Text(
+                  'Select Loading Sheet',
+                  style: AppTheme.titleMedium,
+                ),
+              ],
+            ),
+            const SizedBox(height: AppTheme.spaceMD),
+            DropdownButtonFormField<String>(
+              value: _selectedLoadingNumber,
+              isExpanded: true,
+              decoration: InputDecoration(
+                hintText: 'Select Loading Sheet Number',
+                prefixIcon: const Icon(Icons.numbers_rounded),
+                filled: true,
+                fillColor: AppTheme.surfaceVariant,
+                border: OutlineInputBorder(
+                  borderRadius: AppTheme.borderRadiusMD,
+                  borderSide: BorderSide.none,
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: AppTheme.borderRadiusMD,
+                  borderSide:
+                      BorderSide(color: AppTheme.backgroundAlt, width: 1.5),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: AppTheme.borderRadiusMD,
+                  borderSide:
+                      BorderSide(color: AppTheme.moduleMagazine, width: 2),
+                ),
+                contentPadding: AppTheme.paddingMD,
+              ),
+              items: _loadingNumbers.map((String value) {
+                return DropdownMenuItem<String>(
+                  value: value,
+                  child: Text(
+                    value,
+                    style: AppTheme.bodyMedium,
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
+                  ),
+                );
+              }).toList(),
+              onChanged: (String? newValue) {
+                setState(() {
+                  _selectedLoadingNumber = newValue;
+                });
+                if (newValue != null) {
+                  _fetchLoadingSheets();
+                }
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatsRow() {
+    final completedCount =
+        _loadingSheets.where((s) => s['complete_flag'] == 1).length;
+    final pendingCount = _loadingSheets.length - completedCount;
+
+    return Row(
+      children: [
+        Expanded(
+          child: StatCard(
+            title: 'Total',
+            value: '${_loadingSheets.length}',
+            color: AppTheme.info,
+            compact: true,
+          ),
+        ),
+        const SizedBox(width: AppTheme.spaceMD),
+        Expanded(
+          child: StatCard(
+            title: 'Completed',
+            value: '$completedCount',
+            color: AppTheme.success,
+            compact: true,
+          ),
+        ),
+        const SizedBox(width: AppTheme.spaceMD),
+        Expanded(
+          child: StatCard(
+            title: 'Pending',
+            value: '$pendingCount',
+            color: AppTheme.warning,
+            compact: true,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildContentArea() {
+    if (_isLoading) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(
+              valueColor:
+                  AlwaysStoppedAnimation<Color>(AppTheme.moduleMagazine),
+            ),
+            const SizedBox(height: AppTheme.spaceMD),
+            Text(
+              'Loading sheets...',
+              style:
+                  AppTheme.bodyMedium.copyWith(color: AppTheme.textSecondary),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_errorMessage != null) {
+      return EmptyState(
+        message: _errorMessage!,
+        icon: Icons.error_outline_rounded,
+        onRetry: _fetchLoadingNumbers,
+        retryText: 'Try Again',
+      );
+    }
+
+    if (_loadingNumbers.isEmpty && _magazineController.text.isEmpty) {
+      return EmptyState(
+        message: 'Scan a magazine number to view loading sheets',
+        icon: Icons.qr_code_scanner_rounded,
+      );
+    }
+
+    if (_loadingSheets.isEmpty && _loadingNumbers.isNotEmpty) {
+      return EmptyState(
+        message: 'No loading sheets found for the selected options',
+        icon: Icons.inbox_rounded,
+      );
+    }
+
+    if (_loadingSheets.isEmpty) {
+      return const EmptyState(
+        message: 'No data available',
+        icon: Icons.inbox_rounded,
+      );
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: AppTheme.borderRadiusMD,
+        boxShadow: AppTheme.shadowSM,
+      ),
+      child: Column(
+        children: [
+          // Header
+          Container(
+            padding: AppTheme.paddingMD,
+            decoration: BoxDecoration(
+              gradient: AppTheme.moduleGradient(AppTheme.moduleMagazine),
+              borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(AppTheme.radiusMD)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Loading Sheets',
+                  style: AppTheme.titleMedium.copyWith(color: Colors.white),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppTheme.spaceMD,
+                    vertical: AppTheme.spaceXS,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(AppTheme.radiusCircle),
+                  ),
+                  child: Text(
+                    '${_loadingSheets.length} Items',
+                    style: AppTheme.labelMedium.copyWith(color: Colors.white),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // List
+          Expanded(
+            child: ListView.builder(
+              padding: AppTheme.paddingSM,
+              itemCount: _loadingSheets.length,
+              itemBuilder: (context, index) {
+                final sheet = _loadingSheets[index];
+                return _buildSheetCard(sheet, index);
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSheetCard(Map<String, dynamic> sheet, int index) {
+    final isCompleted = sheet['complete_flag'] == 1;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: AppTheme.spaceXS),
+      decoration: BoxDecoration(
+        color: isCompleted ? AppTheme.successSurface : Colors.white,
+        borderRadius: AppTheme.borderRadiusMD,
+        border: Border.all(
+          color: isCompleted
+              ? AppTheme.success.withOpacity(0.3)
+              : AppTheme.backgroundAlt,
+        ),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: AppTheme.borderRadiusMD,
+        child: InkWell(
+          borderRadius: AppTheme.borderRadiusMD,
+          onTap: isCompleted ? null : () => _navigateToL1Scan(sheet),
+          child: Padding(
+            padding: AppTheme.paddingMD,
+            child: Row(
+              children: [
+                // Status Icon
+                Container(
+                  width: 40,
+                  height: 40,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: isCompleted
+                        ? AppTheme.success.withOpacity(0.1)
+                        : AppTheme.moduleMagazine.withOpacity(0.1),
+                    borderRadius: AppTheme.borderRadiusSM,
+                  ),
+                  child: Icon(
+                    isCompleted ? Icons.check_circle : Icons.pending_actions,
+                    color: isCompleted
+                        ? AppTheme.success
+                        : AppTheme.moduleMagazine,
+                    size: 22,
+                  ),
+                ),
+                const SizedBox(width: AppTheme.spaceMD),
+                // Content
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              'Loading No: ${sheet['loadingno'] ?? 'N/A'}',
+                              style: AppTheme.titleSmall,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: AppTheme.spaceSM),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: AppTheme.spaceSM,
+                              vertical: AppTheme.spaceXXS,
+                            ),
+                            decoration: BoxDecoration(
+                              color: isCompleted
+                                  ? AppTheme.success
+                                  : AppTheme.warning,
+                              borderRadius:
+                                  BorderRadius.circular(AppTheme.radiusCircle),
+                            ),
+                            child: Text(
+                              isCompleted ? 'Completed' : 'Pending',
+                              style: AppTheme.labelSmall.copyWith(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: AppTheme.spaceXS),
+                      Wrap(
+                        spacing: AppTheme.spaceMD,
+                        runSpacing: AppTheme.spaceXS,
+                        children: [
+                          _buildInfoChip(Icons.local_shipping,
+                              'Truck: ${sheet['truckno'] ?? 'N/A'}'),
+                          _buildInfoChip(
+                              Icons.inventory, '${sheet['bname'] ?? 'N/A'}'),
+                        ],
+                      ),
+                      const SizedBox(height: AppTheme.spaceXS),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              '${sheet['product'] ?? 'N/A'}',
+                              style: AppTheme.bodySmall,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: AppTheme.spaceSM),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: AppTheme.spaceSM,
+                              vertical: AppTheme.spaceXXS,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppTheme.primarySurface,
+                              borderRadius:
+                                  BorderRadius.circular(AppTheme.radiusCircle),
+                            ),
+                            child: Text(
+                              'Cases: ${sheet['laodcases'] ?? 'N/A'}',
+                              style: AppTheme.labelSmall.copyWith(
+                                color: AppTheme.primary,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                if (!isCompleted) ...[
+                  const SizedBox(width: AppTheme.spaceSM),
+                  Icon(
+                    Icons.arrow_forward_ios_rounded,
+                    size: 16,
+                    color: AppTheme.textTertiary,
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoChip(IconData icon, String text) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 14, color: AppTheme.textTertiary),
+        const SizedBox(width: AppTheme.spaceXXS),
+        Text(
+          text,
+          style: AppTheme.labelSmall,
+        ),
+      ],
     );
   }
 }

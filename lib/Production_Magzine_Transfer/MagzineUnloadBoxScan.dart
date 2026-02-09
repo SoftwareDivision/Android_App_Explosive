@@ -1,6 +1,7 @@
 import 'package:explosive_android_app/Database/db_handler.dart';
+import 'package:explosive_android_app/core/app_theme.dart';
+import 'package:explosive_android_app/core/widgets.dart';
 import 'package:flutter/material.dart';
-import 'package:getwidget/getwidget.dart';
 import 'package:flutter/services.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter_tts/flutter_tts.dart';
@@ -26,12 +27,14 @@ class _BoxScanningPageState extends State<BoxScanningPage> {
   late AudioPlayer _audioPlayer;
   List<String> _scannedBoxes = [];
   bool _isLoading = false;
+  bool _isSaving = false;
   List<String> _validBarcodes = [];
   final FlutterTts flutterTts = FlutterTts();
   double volume = 0.5;
   double pitch = 1.0;
   double rate = 0.5;
 
+  // ============ BUSINESS LOGIC (PRESERVED) ============
   @override
   void initState() {
     super.initState();
@@ -46,10 +49,9 @@ class _BoxScanningPageState extends State<BoxScanningPage> {
 
   Future<void> _initAudioPlayer() async {
     _audioPlayer = AudioPlayer()
-      ..setReleaseMode(ReleaseMode.stop) // Stop previous playback
+      ..setReleaseMode(ReleaseMode.stop)
       ..setPlayerMode(PlayerMode.lowLatency);
 
-    // Set global audio context for proper focus handling
     await _audioPlayer.setAudioContext(AudioContext(
       android: AudioContextAndroid(
         contentType: AndroidContentType.sonification,
@@ -91,12 +93,7 @@ class _BoxScanningPageState extends State<BoxScanningPage> {
       });
     } catch (e) {
       _vibrateOnError();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error loading valid barcodes: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      _showSnackBar('Error loading valid barcodes: $e', AppTheme.error);
     } finally {
       setState(() => _isLoading = false);
     }
@@ -127,7 +124,6 @@ class _BoxScanningPageState extends State<BoxScanningPage> {
     }
   }
 
-  // Helper method to clear box field and set focus - consistent approach
   void _clearBoxFieldAndSetFocus() {
     _boxController.clear();
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -143,39 +139,20 @@ class _BoxScanningPageState extends State<BoxScanningPage> {
 
     final String? brandId = widget.magazineData['bid'];
 
-    // Brand ID check
     if (brandId != null && !boxCode.contains(brandId)) {
       _clearBoxFieldAndSetFocus();
       _vibrateOnError();
       await _playSound('music/badread.wav');
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Invalid box: Does not contain the correct Brand ID.',
-            style: TextStyle(color: Colors.white, fontSize: 16.0),
-          ),
-          backgroundColor: Colors.red,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      _showSnackBar('Invalid box: Does not contain the correct Brand ID.',
+          AppTheme.error);
       return;
     }
 
-    // Valid barcode check
     if (!_validBarcodes.contains(boxCode)) {
       _clearBoxFieldAndSetFocus();
       _vibrateOnError();
       await _playSound('music/badread.wav');
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Invalid box code or already loaded',
-            style: TextStyle(fontSize: 16, color: Colors.white),
-          ),
-          backgroundColor: Colors.red,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      _showSnackBar('Invalid box code or already loaded', AppTheme.error);
       return;
     }
 
@@ -184,12 +161,7 @@ class _BoxScanningPageState extends State<BoxScanningPage> {
       _clearBoxFieldAndSetFocus();
       _vibrateOnError();
       await _playSound('music/badread.wav');
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('All boxes have been scanned'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      _showSnackBar('All boxes have been scanned', AppTheme.success);
       return;
     }
 
@@ -197,12 +169,7 @@ class _BoxScanningPageState extends State<BoxScanningPage> {
       _clearBoxFieldAndSetFocus();
       _vibrateOnError();
       await _playSound('music/badread.wav');
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Box already scanned'),
-          backgroundColor: Colors.orange,
-        ),
-      );
+      _showSnackBar('Box already scanned', AppTheme.warning);
       return;
     }
 
@@ -217,13 +184,8 @@ class _BoxScanningPageState extends State<BoxScanningPage> {
       try {
         await _audioPlayer.stop();
         await _audioPlayer.play(AssetSource('music/completdscan.m4a'));
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('All boxes have been scanned successfully!'),
-            backgroundColor: Colors.green,
-            duration: Duration(seconds: 2),
-          ),
-        );
+        _showSnackBar(
+            'All boxes have been scanned successfully!', AppTheme.success);
       } catch (e) {
         debugPrint('Completion sound error: $e');
       }
@@ -232,322 +194,587 @@ class _BoxScanningPageState extends State<BoxScanningPage> {
     await _announceScannedCount();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return PopScope(
-      canPop: false,
-      onPopInvoked: (didPop) async {
-        if (didPop) {
-          return;
-        }
+  Future<void> _handleSave() async {
+    if (_isSaving) return;
 
-        if (_scannedBoxes.isEmpty) {
-          Navigator.of(context).pop();
-          return;
-        }
+    final totalCases = widget.magazineData['case_quantity'] ?? 0;
+    if (_scannedBoxes.length < totalCases) {
+      _showSnackBar('Please scan all boxes before saving', AppTheme.warning);
+      return;
+    }
 
-        final shouldPop = await showDialog<bool>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text('Confirm Exit'),
-            content: const Text(
-                'Are you sure you want to go back? All scanned box data will be cleared.'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('Cancel'),
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: AppTheme.borderRadiusLG),
+        title: Row(
+          children: [
+            Container(
+              padding: AppTheme.paddingSM,
+              decoration: BoxDecoration(
+                color: AppTheme.successSurface,
+                borderRadius: AppTheme.borderRadiusSM,
               ),
-              TextButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('Yes, Go Back'),
-              ),
-            ],
+              child: const Icon(Icons.save_rounded, color: AppTheme.success),
+            ),
+            const SizedBox(width: AppTheme.spaceMD),
+            const Text('Confirm Save'),
+          ],
+        ),
+        content: const Text('Are you sure you want to save the scanned boxes?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child:
+                Text('Cancel', style: TextStyle(color: AppTheme.textSecondary)),
           ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.success,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    setState(() => _isSaving = true);
+    try {
+      final db = await DBHandler.getDatabase();
+      final result = await db!.query(
+        'magzinestocktransfer',
+        columns: ['id'],
+        where:
+            'transfer_id = ? AND magazine_name = ?  AND plant =? AND bid = ? AND sizecode = ?',
+        whereArgs: [
+          widget.magazineData['transfer_id'],
+          widget.magazineData['magazine_name'],
+          widget.magazineData['plant'],
+          widget.magazineData['bid'],
+          widget.magazineData['sizecode'],
+        ],
+        limit: 1,
+      );
+
+      if (result.isNotEmpty) {
+        final magazineTransferId = result.first['id'] as int;
+
+        for (String barcode in _scannedBoxes) {
+          await DBHandler.insertScannedBox(magazineTransferId, barcode);
+
+          await db.update(
+            'productiontomagazine_loading',
+            {'flag': 1},
+            where: 'l1barcode = ?',
+            whereArgs: [barcode],
+          );
+        }
+
+        await db.update(
+          'magzinestocktransfer',
+          {'read_flag': 1},
+          where: 'id = ?',
+          whereArgs: [magazineTransferId],
         );
 
-        if (shouldPop == true) {
+        setState(() {
           _scannedBoxes.clear();
-          Navigator.of(context).pop();
+        });
+
+        _showSnackBar('Boxes saved successfully!', AppTheme.success);
+        Navigator.pop(context, null);
+      } else {
+        _showSnackBar('Magazine transfer record not found', AppTheme.error);
+      }
+    } catch (e) {
+      _showSnackBar('Error saving scanned boxes: $e', AppTheme.error);
+    } finally {
+      setState(() => _isSaving = false);
+    }
+  }
+
+  Future<bool> _onWillPop() async {
+    if (_scannedBoxes.isEmpty) return true;
+
+    final shouldPop = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: AppTheme.borderRadiusLG),
+        title: Row(
+          children: [
+            Container(
+              padding: AppTheme.paddingSM,
+              decoration: BoxDecoration(
+                color: AppTheme.warningSurface,
+                borderRadius: AppTheme.borderRadiusSM,
+              ),
+              child: const Icon(Icons.warning_amber_rounded,
+                  color: AppTheme.warning),
+            ),
+            const SizedBox(width: AppTheme.spaceMD),
+            const Text('Confirm Exit'),
+          ],
+        ),
+        content: const Text(
+            'Are you sure you want to go back? All scanned box data will be cleared.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child:
+                Text('Cancel', style: TextStyle(color: AppTheme.textSecondary)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.warning,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Yes, Go Back'),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldPop == true) {
+      _scannedBoxes.clear();
+    }
+    return shouldPop ?? false;
+  }
+  // ============ END BUSINESS LOGIC ============
+
+  void _showSnackBar(String message, Color color) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(
+              color == AppTheme.success
+                  ? Icons.check_circle
+                  : color == AppTheme.warning
+                      ? Icons.warning
+                      : Icons.error_outline,
+              color: Colors.white,
+            ),
+            const SizedBox(width: AppTheme.spaceSM),
+            Expanded(child: Text(message)),
+          ],
+        ),
+        backgroundColor: color,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: AppTheme.borderRadiusMD),
+        margin: AppTheme.paddingMD,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final totalCases = widget.magazineData['case_quantity'] ?? 0;
+    final progress = totalCases > 0 ? _scannedBoxes.length / totalCases : 0.0;
+    final isComplete = _scannedBoxes.length == totalCases;
+
+    return PopScope(
+      canPop: _scannedBoxes.isEmpty,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (!didPop) {
+          final shouldPop = await _onWillPop();
+          if (shouldPop && mounted) {
+            Navigator.of(context).pop();
+          }
         }
       },
       child: Scaffold(
-        appBar: GFAppBar(
-          title: const Text(
-            'Box Scanning',
-            style: TextStyle(color: Colors.white, fontSize: 20),
-          ),
-          backgroundColor: Colors.blue[800],
+        resizeToAvoidBottomInset: true,
+        appBar: const CustomAppBar(
+          title: 'Box Scanning',
+          backgroundColor: AppTheme.moduleDirectDispatch,
         ),
-        body: Stack(
-          children: [
-            Container(
-              decoration: const BoxDecoration(
-                image: DecorationImage(
-                  image: AssetImage('assets/images/pexels-hngstrm-1939485.jpg'),
-                  fit: BoxFit.cover,
-                ),
-              ),
-            ),
-            SingleChildScrollView(
-              padding: const EdgeInsets.all(5.0),
-              child: Column(
-                children: [
-                  // Magazine Details Card
-                  Card(
-                    elevation: 6,
-                    child: Padding(
-                      padding: const EdgeInsets.all(10.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Magazine: ${widget.magazineData['magazine_name']}',
-                            style: const TextStyle(fontWeight: FontWeight.bold),
+        body: GradientBackground(
+          child: SafeArea(
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : Column(
+                    children: [
+                      // Progress Bar
+                      Container(
+                        height: 4,
+                        child: LinearProgressIndicator(
+                          value: progress,
+                          backgroundColor: AppTheme.backgroundAlt,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            isComplete
+                                ? AppTheme.success
+                                : AppTheme.moduleDirectDispatch,
                           ),
-                          Text(
-                              'Brand: ${widget.magazineData['bname'] ?? 'N/A'} (ID: ${widget.magazineData['bid'] ?? 'N/A'})'),
-                          Text(
-                              'Product Size: ${widget.magazineData['productsize'] ?? 'N/A'} (Code: ${widget.magazineData['sizecode'] ?? 'N/A'})'),
-                          Text(
-                              'Cases: ${widget.magazineData['case_quantity']}'),
-                          Text(
-                              'Total Weight: ${widget.magazineData['total_wt']}'),
-                          const SizedBox(height: 16),
-                          LinearProgressIndicator(
-                            value: widget.magazineData['case_quantity'] > 0
-                                ? _scannedBoxes.length /
-                                    widget.magazineData['case_quantity']
-                                : 0,
-                            backgroundColor: Colors.grey[200],
-                            valueColor: AlwaysStoppedAnimation<Color>(
-                                Colors.blue[800]!),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Scanned: ${_scannedBoxes.length} / ${widget.magazineData['case_quantity']}',
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                        ],
+                        ),
                       ),
-                    ),
-                  ),
-                  const SizedBox(height: 5),
-                  // Box Scanning Card
-                  Card(
-                    elevation: 6,
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Column(
-                        children: [
-                          TextField(
-                            controller: _boxController,
-                            focusNode: _boxFocusNode,
-                            decoration: InputDecoration(
-                              labelText: 'Scan Box',
-                              suffixIcon: IconButton(
-                                icon: const Icon(Icons.qr_code_scanner),
-                                onPressed: () async {
-                                  final code = _boxController.text;
-                                  if (code.isNotEmpty) {
-                                    await _scanBox(code);
-                                  } else {
-                                    _clearBoxFieldAndSetFocus();
-                                  }
-                                },
-                              ),
-                            ),
-                            onSubmitted: (value) async {
-                              if (value.isEmpty) {
-                                _clearBoxFieldAndSetFocus();
-                                return;
-                              }
 
-                              if (value.length != 27) {
-                                await _playSound('music/badread.wav');
-                                _vibrateOnError();
-                                GFToast.showToast(
-                                  'Box code must be 27 digits',
-                                  context,
-                                  toastPosition: GFToastPosition.BOTTOM,
-                                  backgroundColor: Colors.orange,
-                                );
-                                _clearBoxFieldAndSetFocus();
-                                return;
-                              }
+                      Expanded(
+                        child: SingleChildScrollView(
+                          padding: AppTheme.paddingMD,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Magazine Details Card
+                              _buildDetailsCard(),
+                              const SizedBox(height: AppTheme.spaceMD),
 
-                              await _scanBox(value);
-                            },
+                              // Progress Stats
+                              _buildProgressStats(isComplete, totalCases),
+                              const SizedBox(height: AppTheme.spaceMD),
+
+                              // Scan Input
+                              _buildScanInput(),
+                              const SizedBox(height: AppTheme.spaceMD),
+
+                              // Scanned Boxes List
+                              _buildScannedList(),
+                            ],
                           ),
-                        ],
+                        ),
                       ),
-                    ),
-                  ),
-                  const SizedBox(height: 5),
-                  // Scanned Boxes List Card
-                  Card(
-                    elevation: 6,
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Scanned Boxes',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 1),
-                          ListView.builder(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemCount: _scannedBoxes.length,
-                            itemBuilder: (context, index) {
-                              final sortedBoxes =
-                                  List<String>.from(_scannedBoxes)..sort();
-                              return ListTile(
-                                title: Text(sortedBoxes[index]),
-                                leading: const Icon(Icons.check_circle,
-                                    color: Colors.green, size: 24),
-                                dense: true,
-                                visualDensity:
-                                    const VisualDensity(vertical: -4),
-                                contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 16.0, vertical: 0),
-                              );
-                            },
-                          ),
-                        ],
+
+                      // Save Button
+                      Padding(
+                        padding: AppTheme.paddingMD,
+                        child: _buildSaveButton(isComplete),
                       ),
-                    ),
+                    ],
                   ),
-                ],
-              ),
-            ),
-            if (_isLoading) const Center(child: CircularProgressIndicator()),
-          ],
-        ),
-        bottomNavigationBar: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: GFButton(
-            onPressed: () async {
-              final totalCases = widget.magazineData['case_quantity'] ?? 0;
-              if (_scannedBoxes.length < totalCases) {
-                GFToast.showToast(
-                  'Please scan all boxes before saving',
-                  context,
-                  toastPosition: GFToastPosition.BOTTOM,
-                  backgroundColor: Colors.orange,
-                );
-                return;
-              }
-
-              // Show confirmation dialog
-              final confirm = await showDialog<bool>(
-                context: context,
-                builder: (context) => AlertDialog(
-                  title: const Text('Confirm Save'),
-                  content: const Text(
-                      'Are you sure you want to save the scanned boxes?'),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(context, false),
-                      child: const Text('Cancel'),
-                    ),
-                    TextButton(
-                      onPressed: () => Navigator.pop(context, true),
-                      child: const Text('Save'),
-                    ),
-                  ],
-                ),
-              );
-
-              if (confirm != true) return;
-
-              setState(() => _isLoading = true);
-              try {
-                // Get the magazine transfer ID by querying the database
-                final db = await DBHandler.getDatabase();
-                final result = await db!.query(
-                  'magzinestocktransfer',
-                  columns: ['id'],
-                  where:
-                      'transfer_id = ? AND magazine_name = ?  AND plant =? AND bid = ? AND sizecode = ?',
-                  whereArgs: [
-                    widget.magazineData['transfer_id'],
-                    widget.magazineData['magazine_name'],
-                    widget.magazineData['plant'],
-                    widget.magazineData['bid'],
-                    widget.magazineData['sizecode'],
-                  ],
-                  limit: 1,
-                );
-
-                if (result.isNotEmpty) {
-                  final magazineTransferId = result.first['id'] as int;
-
-                  // Save each scanned box
-                  for (String barcode in _scannedBoxes) {
-                    await DBHandler.insertScannedBox(
-                        magazineTransferId, barcode);
-
-                    await db.update(
-                      'productiontomagazine_loading',
-                      {'flag': 1},
-                      where: 'l1barcode = ?',
-                      whereArgs: [barcode],
-                    );
-                  }
-
-                  // Update read_flag to 1
-                  await db.update(
-                    'magzinestocktransfer',
-                    {'read_flag': 1},
-                    where: 'id = ?',
-                    whereArgs: [magazineTransferId],
-                  );
-
-                  // Clear the scanned boxes list
-                  setState(() {
-                    _scannedBoxes.clear();
-                  });
-
-                  GFToast.showToast(
-                    'Boxes saved successfully!',
-                    context,
-                    toastPosition: GFToastPosition.BOTTOM,
-                    backgroundColor: Colors.green,
-                  );
-
-                  // Navigate back and trigger parent state reset
-                  Navigator.pop(context, null);
-                } else {
-                  GFToast.showToast(
-                    'Magazine transfer record not found',
-                    context,
-                    toastPosition: GFToastPosition.BOTTOM,
-                    backgroundColor: Colors.red,
-                  );
-                }
-              } catch (e) {
-                GFToast.showToast(
-                  'Error saving scanned boxes: $e',
-                  context,
-                  toastPosition: GFToastPosition.BOTTOM,
-                  backgroundColor: Colors.red,
-                );
-              } finally {
-                setState(() => _isLoading = false);
-              }
-            },
-            text: 'Save',
-            size: GFSize.LARGE,
-            fullWidthButton: true,
-            color: Colors.blue[800]!,
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildDetailsCard() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: AppTheme.borderRadiusMD,
+        boxShadow: AppTheme.shadowSM,
+      ),
+      child: Column(
+        children: [
+          Container(
+            padding: AppTheme.paddingMD,
+            decoration: BoxDecoration(
+              gradient: AppTheme.moduleGradient(AppTheme.moduleDirectDispatch),
+              borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(AppTheme.radiusMD)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.warehouse_rounded,
+                    color: Colors.white, size: 20),
+                const SizedBox(width: AppTheme.spaceSM),
+                Text(
+                  'Magazine: ${widget.magazineData['magazine_name']}',
+                  style: AppTheme.titleSmall.copyWith(color: Colors.white),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: AppTheme.paddingMD,
+            child: Column(
+              children: [
+                _buildDetailRow(
+                    'Brand',
+                    '${widget.magazineData['bname'] ?? 'N/A'} (${widget.magazineData['bid'] ?? 'N/A'})',
+                    Icons.inventory),
+                _buildDetailRow(
+                    'Product Size',
+                    '${widget.magazineData['productsize'] ?? 'N/A'}',
+                    Icons.straighten),
+                _buildDetailRow(
+                    'Total Cases',
+                    '${widget.magazineData['case_quantity']}',
+                    Icons.inventory_2),
+                _buildDetailRow('Total Weight',
+                    '${widget.magazineData['total_wt']}', Icons.scale),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDetailRow(String label, String value, IconData icon) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppTheme.spaceXS),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: AppTheme.textTertiary),
+          const SizedBox(width: AppTheme.spaceSM),
+          SizedBox(
+            width: 90,
+            child: Text(label, style: AppTheme.labelSmall),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: AppTheme.bodySmall.copyWith(fontWeight: FontWeight.w500),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProgressStats(bool isComplete, int totalCases) {
+    return Row(
+      children: [
+        Expanded(
+          child: StatCard(
+            title: 'Scanned',
+            value: '${_scannedBoxes.length}',
+            color: isComplete ? AppTheme.success : AppTheme.info,
+            icon: Icons.qr_code_scanner,
+            compact: true,
+          ),
+        ),
+        const SizedBox(width: AppTheme.spaceMD),
+        Expanded(
+          child: StatCard(
+            title: 'Target',
+            value: '$totalCases',
+            color: AppTheme.moduleDirectDispatch,
+            icon: Icons.flag_rounded,
+            compact: true,
+          ),
+        ),
+        const SizedBox(width: AppTheme.spaceMD),
+        Expanded(
+          child: StatCard(
+            title: 'Remaining',
+            value: '${totalCases - _scannedBoxes.length}',
+            color: (totalCases - _scannedBoxes.length) > 0
+                ? AppTheme.warning
+                : AppTheme.success,
+            icon: Icons.pending_actions,
+            compact: true,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildScanInput() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: AppTheme.borderRadiusMD,
+        boxShadow: AppTheme.shadowSM,
+      ),
+      padding: AppTheme.paddingMD,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.qr_code_scanner,
+                  size: 18, color: AppTheme.moduleDirectDispatch),
+              const SizedBox(width: AppTheme.spaceSM),
+              Text('Scan Box', style: AppTheme.titleSmall),
+            ],
+          ),
+          const SizedBox(height: AppTheme.spaceMD),
+          TextField(
+            controller: _boxController,
+            focusNode: _boxFocusNode,
+            style: AppTheme.bodyMedium,
+            decoration: InputDecoration(
+              hintText: 'Scan or enter box barcode (27 digits)',
+              prefixIcon: const Icon(Icons.document_scanner_outlined),
+              suffixIcon: Container(
+                margin: const EdgeInsets.all(AppTheme.spaceXS),
+                decoration: BoxDecoration(
+                  color: AppTheme.moduleDirectDispatch.withOpacity(0.1),
+                  borderRadius: AppTheme.borderRadiusSM,
+                ),
+                child: IconButton(
+                  icon: Icon(Icons.qr_code_scanner,
+                      color: AppTheme.moduleDirectDispatch),
+                  onPressed: () async {
+                    final code = _boxController.text;
+                    if (code.isNotEmpty) {
+                      await _scanBox(code);
+                    } else {
+                      _clearBoxFieldAndSetFocus();
+                    }
+                  },
+                ),
+              ),
+              filled: true,
+              fillColor: AppTheme.surfaceVariant,
+              border: OutlineInputBorder(
+                borderRadius: AppTheme.borderRadiusMD,
+                borderSide: BorderSide.none,
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: AppTheme.borderRadiusMD,
+                borderSide:
+                    BorderSide(color: AppTheme.moduleDirectDispatch, width: 2),
+              ),
+              contentPadding: AppTheme.paddingMD,
+            ),
+            onSubmitted: (value) async {
+              if (value.isEmpty) {
+                _clearBoxFieldAndSetFocus();
+                return;
+              }
+
+              if (value.length != 27) {
+                await _playSound('music/badread.wav');
+                _vibrateOnError();
+                _showSnackBar('Box code must be 27 digits', AppTheme.warning);
+                _clearBoxFieldAndSetFocus();
+                return;
+              }
+
+              await _scanBox(value);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildScannedList() {
+    final sortedBoxes = List<String>.from(_scannedBoxes)..sort();
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: AppTheme.borderRadiusMD,
+        boxShadow: AppTheme.shadowSM,
+      ),
+      child: Column(
+        children: [
+          Container(
+            padding: AppTheme.paddingMD,
+            decoration: BoxDecoration(
+              color: AppTheme.surfaceVariant,
+              borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(AppTheme.radiusMD)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Flexible(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.list_alt,
+                          size: 18, color: AppTheme.textSecondary),
+                      const SizedBox(width: AppTheme.spaceSM),
+                      Flexible(
+                        child: Text(
+                          'Scanned Boxes',
+                          style: AppTheme.titleSmall,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppTheme.spaceMD,
+                    vertical: AppTheme.spaceXS,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppTheme.moduleDirectDispatch.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(AppTheme.radiusCircle),
+                  ),
+                  child: Text(
+                    '${_scannedBoxes.length}',
+                    style: AppTheme.labelMedium.copyWith(
+                      color: AppTheme.moduleDirectDispatch,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          sortedBoxes.isEmpty
+              ? const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 40),
+                  child: EmptyState(
+                    message:
+                        'No boxes scanned yet.\nScan a box to get started.',
+                    icon: Icons.inventory_2_rounded,
+                  ),
+                )
+              : ListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  padding: AppTheme.paddingXS,
+                  itemCount: sortedBoxes.length,
+                  itemBuilder: (context, index) {
+                    return Container(
+                      margin: const EdgeInsets.symmetric(
+                        horizontal: AppTheme.spaceXS,
+                        vertical: AppTheme.spaceXXS,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppTheme.successSurface,
+                        borderRadius: AppTheme.borderRadiusSM,
+                        border: Border.all(
+                            color: AppTheme.success.withOpacity(0.3)),
+                      ),
+                      child: ListTile(
+                        dense: true,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: AppTheme.spaceMD,
+                          vertical: 0,
+                        ),
+                        leading: Container(
+                          width: 28,
+                          height: 28,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: AppTheme.success,
+                            borderRadius: AppTheme.borderRadiusSM,
+                          ),
+                          child: const Icon(
+                            Icons.check,
+                            color: Colors.white,
+                            size: 16,
+                          ),
+                        ),
+                        title: Text(
+                          sortedBoxes[index],
+                          style: AppTheme.bodySmall.copyWith(
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSaveButton(bool isComplete) {
+    return PrimaryButton(
+      text: _isSaving
+          ? 'Saving...'
+          : 'Save (${_scannedBoxes.length}/${widget.magazineData['case_quantity']})',
+      icon: Icons.save_rounded,
+      onPressed: isComplete && !_isSaving ? _handleSave : null,
+      isLoading: _isSaving,
+      backgroundColor: isComplete ? AppTheme.success : AppTheme.backgroundAlt,
+      foregroundColor: isComplete ? Colors.white : AppTheme.textTertiary,
     );
   }
 }

@@ -1,7 +1,8 @@
 import 'package:explosive_android_app/Production_Magzine_Transfer/MagzineUnloadBoxScan.dart';
 import 'package:flutter/material.dart';
-import 'package:getwidget/getwidget.dart';
 import '../Database/db_handler.dart';
+import '../core/app_theme.dart';
+import '../core/widgets.dart';
 import 'package:audioplayers/audioplayers.dart';
 
 class UnloadingOperation extends StatefulWidget {
@@ -19,10 +20,10 @@ class _UnloadingOperationState extends State<UnloadingOperation> {
   final FocusNode _magazineFocusNode = FocusNode();
   final AudioPlayer _audioPlayer = AudioPlayer();
 
+  // ============ BUSINESS LOGIC (PRESERVED) ============
   @override
   void initState() {
     super.initState();
-    // Set focus to magazine TextField after the widget is built
     WidgetsBinding.instance.addPostFrameCallback((_) {
       FocusScope.of(context).requestFocus(_magazineFocusNode);
     });
@@ -57,12 +58,8 @@ class _UnloadingOperationState extends State<UnloadingOperation> {
           } else {
             _magazineDataList = [];
             _scannedMagazine = null;
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('No data found for magazine: $magazineCode'),
-                backgroundColor: Colors.red,
-              ),
-            );
+            _showSnackBar(
+                'No data found for magazine: $magazineCode', AppTheme.warning);
           }
           _isLoading = false;
         });
@@ -73,16 +70,10 @@ class _UnloadingOperationState extends State<UnloadingOperation> {
         _magazineDataList = [];
         _scannedMagazine = null;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error loading magazine data: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      _showSnackBar('Error loading magazine data: $e', AppTheme.error);
     }
   }
 
-  // Helper method to clear magazine field and set focus - consistent approach
   void _clearMagazineFieldAndSetFocus() {
     _magazineController.clear();
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -90,7 +81,6 @@ class _UnloadingOperationState extends State<UnloadingOperation> {
     });
   }
 
-  // New method to reset the scan
   void _resetScan() {
     setState(() {
       _scannedMagazine = null;
@@ -103,156 +93,413 @@ class _UnloadingOperationState extends State<UnloadingOperation> {
     await _audioPlayer.stop();
     await _audioPlayer.play(AssetSource(assetPath));
   }
+  // ============ END BUSINESS LOGIC ============
+
+  void _showSnackBar(String message, Color color) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(
+              color == AppTheme.success
+                  ? Icons.check_circle
+                  : color == AppTheme.warning
+                      ? Icons.warning
+                      : Icons.error_outline,
+              color: Colors.white,
+            ),
+            const SizedBox(width: AppTheme.spaceSM),
+            Expanded(child: Text(message)),
+          ],
+        ),
+        backgroundColor: color,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: AppTheme.borderRadiusMD),
+        margin: AppTheme.paddingMD,
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: GFAppBar(
-        title: const Text(
-          'Unloading Operation',
-          style: TextStyle(color: Colors.white, fontSize: 20),
-        ),
-        backgroundColor: Colors.blue[800],
-        // Add reset button
+      resizeToAvoidBottomInset: true,
+      appBar: CustomAppBar(
+        title: 'Unloading Operation',
+        backgroundColor: AppTheme.moduleDirectDispatch,
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh, color: Colors.white),
+            icon: const Icon(Icons.refresh_rounded, color: Colors.white),
             onPressed: _resetScan,
             tooltip: 'Reset Scan',
           ),
         ],
       ),
-      body: Stack(
-        children: [
-          Container(
-            decoration: const BoxDecoration(
-              image: DecorationImage(
-                image: AssetImage('assets/images/pexels-hngstrm-1939485.jpg'),
-                fit: BoxFit.cover,
-              ),
+      body: GradientBackground(
+        child: SafeArea(
+          child: SingleChildScrollView(
+            padding: AppTheme.paddingMD,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Magazine Scan Input
+                _buildMagazineScanCard(),
+                const SizedBox(height: AppTheme.spaceMD),
+
+                // Loading Indicator
+                if (_isLoading)
+                  Center(
+                    child: Padding(
+                      padding: AppTheme.paddingXL,
+                      child: Column(
+                        children: [
+                          CircularProgressIndicator(
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                                AppTheme.moduleDirectDispatch),
+                          ),
+                          const SizedBox(height: AppTheme.spaceMD),
+                          Text(
+                            'Loading magazine data...',
+                            style: AppTheme.bodyMedium
+                                .copyWith(color: AppTheme.textSecondary),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                // Results Section
+                if (_magazineDataList.isNotEmpty) ...[
+                  // Stats Card
+                  _buildStatsCard(),
+                  const SizedBox(height: AppTheme.spaceMD),
+
+                  // Magazine Records List Section Header
+                  Text(
+                    'Available Records',
+                    style: AppTheme.titleMedium,
+                  ),
+                  const SizedBox(height: AppTheme.spaceSM),
+
+                  // Magazine Data Cards
+                  ..._magazineDataList
+                      .map((magazineData) => _buildMagazineCard(magazineData)),
+                ],
+
+                // Empty State when no results
+                if (!_isLoading &&
+                    _magazineDataList.isEmpty &&
+                    _scannedMagazine == null)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 80),
+                    child: EmptyState(
+                      message:
+                          'Scan a magazine barcode to view unloading records',
+                      icon: Icons.qr_code_scanner_rounded,
+                    ),
+                  ),
+              ],
             ),
           ),
-          SingleChildScrollView(
-            padding: const EdgeInsets.all(5.0),
-            child: Column(
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMagazineScanCard() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: AppTheme.borderRadiusMD,
+        boxShadow: AppTheme.shadowMD,
+      ),
+      child: Padding(
+        padding: AppTheme.paddingLG,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
               children: [
-                // Magazine Scanning Section
-                Card(
-                  elevation: 6,
-                  child: Padding(
-                    padding: const EdgeInsets.all(10.0),
-                    child: Column(
-                      children: [
-                        TextField(
-                          controller: _magazineController,
-                          focusNode: _magazineFocusNode,
-                          decoration: InputDecoration(
-                            labelText: 'Scan Magazine',
-                            suffixIcon: IconButton(
-                              icon: const Icon(Icons.qr_code_scanner),
-                              onPressed: () async {
-                                // Implement actual scanner integration here
-                                final code = _magazineController.text;
-                                if (code.isNotEmpty) {
-                                  await _scanMagazine(code);
-                                  _magazineController.clear();
-                                }
-                              },
-                            ),
-                          ),
-                          onSubmitted: (value) async {
-                            if (value.isNotEmpty) {
-                              await _scanMagazine(value);
-                              _magazineController.clear();
-                            }
-                          },
-                        ),
-                      ],
-                    ),
+                Container(
+                  padding: AppTheme.paddingSM,
+                  decoration: BoxDecoration(
+                    color: AppTheme.moduleDirectDispatch.withOpacity(0.1),
+                    borderRadius: AppTheme.borderRadiusSM,
+                  ),
+                  child: Icon(
+                    Icons.warehouse_rounded,
+                    color: AppTheme.moduleDirectDispatch,
+                    size: 20,
                   ),
                 ),
-                if (_magazineDataList.isNotEmpty) ...[
-                  const SizedBox(height: 5),
-                  // Show count of matching records
-                  Card(
-                    elevation: 6,
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Text(
-                        'Found ${_magazineDataList.length} unloading record(s) for magazine: $_scannedMagazine',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
-                      ),
-                    ),
+                const SizedBox(width: AppTheme.spaceMD),
+                Text(
+                  'Scan Magazine',
+                  style: AppTheme.titleMedium,
+                ),
+              ],
+            ),
+            const SizedBox(height: AppTheme.spaceMD),
+            TextField(
+              controller: _magazineController,
+              focusNode: _magazineFocusNode,
+              style: AppTheme.bodyMedium,
+              decoration: InputDecoration(
+                hintText: 'Scan or enter magazine code',
+                prefixIcon: const Icon(Icons.document_scanner_outlined),
+                suffixIcon: Container(
+                  margin: const EdgeInsets.all(AppTheme.spaceXS),
+                  decoration: BoxDecoration(
+                    color: AppTheme.moduleDirectDispatch.withOpacity(0.1),
+                    borderRadius: AppTheme.borderRadiusSM,
                   ),
-                  const SizedBox(height: 5),
-                  // Magazine Details Cards - one for each record
-                  ..._magazineDataList.map(
-                    (magazineData) => GestureDetector(
-                      onTap: () async {
-                        final result = await Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => BoxScanningPage(
-                              magazineData: magazineData,
-                              scannedBoxes: [], // Pass empty list since we're removing local box scanning
-                            ),
-                          ),
-                        );
-
-                        // Reset all data when returning from BoxScanningPage
-                        setState(() {
-                          _magazineDataList = [];
-                          _scannedMagazine = null;
-                        });
-
-                        // Set focus back to magazine scanner
-                        _clearMagazineFieldAndSetFocus();
-                      },
-                      child: Card(
-                        elevation: 6,
-                        margin: const EdgeInsets.only(bottom: 10),
-                        child: Padding(
-                          padding: const EdgeInsets.all(16.0),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Transfer ID: ${magazineData["transfer_id"]}',
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.bold),
-                              ),
-                              Text(
-                                  'Plant: ${magazineData["plant"]} (Code: ${magazineData["plantcode"] ?? 'N/A'})'),
-                              Text(
-                                  'Brand: ${magazineData["bname"] ?? 'N/A'} (ID: ${magazineData["bid"] ?? 'N/A'})'),
-                              Text(
-                                  'Product Size: ${magazineData["productsize"] ?? 'N/A'} (Code: ${magazineData["sizecode"] ?? 'N/A'})'),
-                              Text('Cases: ${magazineData["case_quantity"]}'),
-                              Text('Total Weight: ${magazineData["total_wt"]}'),
-                              Text('Truck No: ${magazineData["truck_no"]}'),
-                              const SizedBox(height: 8),
-                              // Add a visual indicator that this is selectable
-                              const Align(
-                                alignment: Alignment.centerRight,
-                                child: Icon(Icons.arrow_forward_ios, size: 16),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
+                  child: IconButton(
+                    icon: Icon(Icons.search,
+                        color: AppTheme.moduleDirectDispatch),
+                    onPressed: () async {
+                      final code = _magazineController.text;
+                      if (code.isNotEmpty) {
+                        await _scanMagazine(code);
+                        _magazineController.clear();
+                      }
+                    },
                   ),
-                ],
-                if (_isLoading)
-                  const Center(child: CircularProgressIndicator()),
+                ),
+                filled: true,
+                fillColor: AppTheme.surfaceVariant,
+                border: OutlineInputBorder(
+                  borderRadius: AppTheme.borderRadiusMD,
+                  borderSide: BorderSide.none,
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: AppTheme.borderRadiusMD,
+                  borderSide: BorderSide(
+                      color: AppTheme.moduleDirectDispatch, width: 2),
+                ),
+                contentPadding: AppTheme.paddingMD,
+              ),
+              onSubmitted: (value) async {
+                if (value.isNotEmpty) {
+                  await _scanMagazine(value);
+                  _magazineController.clear();
+                }
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatsCard() {
+    return Container(
+      padding: AppTheme.paddingLG,
+      decoration: BoxDecoration(
+        gradient: AppTheme.moduleGradient(AppTheme.moduleDirectDispatch),
+        borderRadius: AppTheme.borderRadiusMD,
+        boxShadow: AppTheme.shadowMD,
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.2),
+              borderRadius: AppTheme.borderRadiusSM,
+            ),
+            child: const Icon(
+              Icons.inventory_2_rounded,
+              color: Colors.white,
+              size: 24,
+            ),
+          ),
+          const SizedBox(width: AppTheme.spaceLG),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Magazine: $_scannedMagazine',
+                  style: AppTheme.titleMedium.copyWith(color: Colors.white),
+                ),
+                const SizedBox(height: AppTheme.spaceXS),
+                Text(
+                  '${_magazineDataList.length} unloading record(s) available',
+                  style: AppTheme.bodySmall.copyWith(
+                    color: Colors.white.withOpacity(0.9),
+                  ),
+                ),
               ],
             ),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildMagazineCard(Map<String, dynamic> magazineData) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: AppTheme.spaceMD),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: AppTheme.borderRadiusMD,
+        boxShadow: AppTheme.shadowSM,
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: AppTheme.borderRadiusMD,
+        child: InkWell(
+          borderRadius: AppTheme.borderRadiusMD,
+          onTap: () async {
+            final result = await Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => BoxScanningPage(
+                  magazineData: magazineData,
+                  scannedBoxes: [],
+                ),
+              ),
+            );
+
+            setState(() {
+              _magazineDataList = [];
+              _scannedMagazine = null;
+            });
+            _clearMagazineFieldAndSetFocus();
+          },
+          child: Padding(
+            padding: AppTheme.paddingLG,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header Row
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Flexible(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            padding: AppTheme.paddingSM,
+                            decoration: BoxDecoration(
+                              color: AppTheme.primarySurface,
+                              borderRadius: AppTheme.borderRadiusSM,
+                            ),
+                            child: const Icon(
+                              Icons.assignment_rounded,
+                              color: AppTheme.primary,
+                              size: 18,
+                            ),
+                          ),
+                          const SizedBox(width: AppTheme.spaceSM),
+                          Flexible(
+                            child: Text(
+                              'Transfer: ${magazineData["transfer_id"]}',
+                              style: AppTheme.titleSmall,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Icon(
+                      Icons.arrow_forward_ios_rounded,
+                      size: 16,
+                      color: AppTheme.textTertiary,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppTheme.spaceMD),
+
+                // Details Grid
+                Wrap(
+                  spacing: AppTheme.spaceLG,
+                  runSpacing: AppTheme.spaceSM,
+                  children: [
+                    _buildDetailChip(
+                        Icons.business, 'Plant: ${magazineData["plant"]}'),
+                    _buildDetailChip(Icons.inventory,
+                        'Brand: ${magazineData["bname"] ?? "N/A"}'),
+                    _buildDetailChip(Icons.category,
+                        'Size: ${magazineData["productsize"] ?? "N/A"}'),
+                    _buildDetailChip(Icons.local_shipping,
+                        'Truck: ${magazineData["truck_no"]}'),
+                  ],
+                ),
+                const SizedBox(height: AppTheme.spaceMD),
+
+                // Stats Row
+                Row(
+                  children: [
+                    Expanded(
+                      child: Container(
+                        padding: AppTheme.paddingSM,
+                        decoration: BoxDecoration(
+                          color: AppTheme.infoSurface,
+                          borderRadius: AppTheme.borderRadiusSM,
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.inventory_2,
+                                size: 16, color: AppTheme.info),
+                            const SizedBox(width: AppTheme.spaceXS),
+                            Text(
+                              'Cases: ${magazineData["case_quantity"]}',
+                              style: AppTheme.labelMedium.copyWith(
+                                color: AppTheme.info,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: AppTheme.spaceMD),
+                    Expanded(
+                      child: Container(
+                        padding: AppTheme.paddingSM,
+                        decoration: BoxDecoration(
+                          color: AppTheme.successSurface,
+                          borderRadius: AppTheme.borderRadiusSM,
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.scale,
+                                size: 16, color: AppTheme.success),
+                            const SizedBox(width: AppTheme.spaceXS),
+                            Text(
+                              'Weight: ${magazineData["total_wt"]}',
+                              style: AppTheme.labelMedium.copyWith(
+                                color: AppTheme.success,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDetailChip(IconData icon, String text) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 14, color: AppTheme.textTertiary),
+        const SizedBox(width: AppTheme.spaceXXS),
+        Text(text, style: AppTheme.labelSmall),
+      ],
     );
   }
 }

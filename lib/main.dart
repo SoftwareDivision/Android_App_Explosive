@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:explosive_android_app/Database/db_handler.dart';
 import 'package:explosive_android_app/login_page.dart';
+import 'package:explosive_android_app/core/app_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -19,6 +20,7 @@ void main() async {
         },
       ),
       debugShowCheckedModeBanner: false,
+      theme: AppTheme.lightTheme,
     ),
   );
 }
@@ -30,10 +32,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Explosive Storage & Dispatched App',
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-        useMaterial3: true,
-      ),
+      theme: AppTheme.lightTheme,
       home: const LoginPage(),
       debugShowCheckedModeBanner: false,
     );
@@ -45,14 +44,39 @@ class LoadingScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
+    return Scaffold(
+      backgroundColor: AppTheme.background,
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            CircularProgressIndicator(),
-            SizedBox(height: 20),
-            Text('Initializing Database...'),
+            // App Logo or Icon placeholder
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                gradient: AppTheme.primaryGradient,
+                borderRadius: AppTheme.borderRadiusLG,
+                boxShadow: AppTheme.shadowMD,
+              ),
+              child: const Icon(
+                Icons.inventory_2_rounded,
+                size: 40,
+                color: AppTheme.textOnPrimary,
+              ),
+            ),
+            const SizedBox(height: AppTheme.spaceXXL),
+            const CircularProgressIndicator(
+              strokeWidth: 3,
+              valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primary),
+            ),
+            const SizedBox(height: AppTheme.spaceLG),
+            Text(
+              'Initializing Database...',
+              style: AppTheme.bodyMedium.copyWith(
+                color: AppTheme.textSecondary,
+              ),
+            ),
           ],
         ),
       ),
@@ -67,32 +91,71 @@ class ErrorScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppTheme.background,
       body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.error, color: Colors.red, size: 50),
-            const SizedBox(height: 20),
-            const Text('Initialization Failed', style: TextStyle(fontSize: 20)),
-            const SizedBox(height: 10),
-            Text(error, textAlign: TextAlign.center),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: () async {
-                try {
-                  await DBHandler.initDB();
-                  Navigator.of(context).pushReplacement(
-                    MaterialPageRoute(builder: (context) => const MyApp()),
-                  );
-                } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Retry failed: $e')),
-                  );
-                }
-              },
-              child: const Text('Retry'),
-            ),
-          ],
+        child: Padding(
+          padding: AppTheme.paddingXXL,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  color: AppTheme.errorSurface,
+                  borderRadius: AppTheme.borderRadiusLG,
+                ),
+                child: const Icon(
+                  Icons.error_outline_rounded,
+                  color: AppTheme.error,
+                  size: 40,
+                ),
+              ),
+              const SizedBox(height: AppTheme.spaceXXL),
+              Text(
+                'Initialization Failed',
+                style: AppTheme.headlineSmall.copyWith(
+                  color: AppTheme.textPrimary,
+                ),
+              ),
+              const SizedBox(height: AppTheme.spaceMD),
+              Text(
+                error,
+                textAlign: TextAlign.center,
+                style: AppTheme.bodyMedium.copyWith(
+                  color: AppTheme.textSecondary,
+                ),
+              ),
+              const SizedBox(height: AppTheme.spaceXXL),
+              ElevatedButton.icon(
+                onPressed: () async {
+                  try {
+                    await DBHandler.initDB();
+                    Navigator.of(context).pushReplacement(
+                      MaterialPageRoute(builder: (context) => const MyApp()),
+                    );
+                  } catch (e) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Retry failed: $e'),
+                        backgroundColor: AppTheme.error,
+                      ),
+                    );
+                  }
+                },
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('Retry'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                  foregroundColor: AppTheme.textOnPrimary,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppTheme.spaceXL,
+                    vertical: AppTheme.spaceMD,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

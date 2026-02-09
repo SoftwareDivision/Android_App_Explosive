@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -11,6 +12,36 @@ import 'package:path_provider/path_provider.dart';
 class DBHandler {
   static Database? _database;
   static const String _apiBaseUrl = 'http://192.168.10.12:4201/api';
+  static const Duration _httpTimeout = Duration(seconds: 30);
+
+  /// Helper method to make HTTP GET requests with timeout
+  static Future<http.Response> _httpGet(String endpoint) async {
+    try {
+      return await http.get(
+        Uri.parse('$_apiBaseUrl$endpoint'),
+        headers: {'Content-Type': 'application/json'},
+      ).timeout(_httpTimeout);
+    } on TimeoutException {
+      throw Exception(
+          'Request timed out. Please check your network connection.');
+    }
+  }
+
+  /// Helper method to make HTTP POST requests with timeout
+  static Future<http.Response> _httpPost(String endpoint, dynamic body) async {
+    try {
+      return await http
+          .post(
+            Uri.parse('$_apiBaseUrl$endpoint'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(body),
+          )
+          .timeout(_httpTimeout);
+    } on TimeoutException {
+      throw Exception(
+          'Request timed out. Please check your network connection.');
+    }
+  }
 
   static Future<void> initDB({Function(int progress)? onProgress}) async {
     try {
@@ -223,10 +254,7 @@ class DBHandler {
 // Insert login details from API into local database
   static Future<void> loginInsert() async {
     try {
-      final response = await http.get(
-        Uri.parse('$_apiBaseUrl/DownloadUploadData/GetLoginDetails'),
-        headers: {'Content-Type': 'application/json'},
-      );
+      final response = await _httpGet('/DownloadUploadData/GetLoginDetails');
 
       if (response.statusCode != 200) {
         throw Exception('Failed to fetch data: ${response.body}');
@@ -373,12 +401,14 @@ class DBHandler {
 
   /// Sync magazine transfer data with API
   static Future<void> downloadMagzineAllottedData() async {
+    final db = await getDatabase();
+    if (db == null) {
+      throw Exception('Database not initialized');
+    }
     try {
       // Fetch data from API
-      final response = await http.get(
-        Uri.parse('$_apiBaseUrl/DownloadUploadData/GetMagzineAllottedData'),
-        headers: {'Content-Type': 'application/json'},
-      );
+      final response =
+          await _httpGet('/DownloadUploadData/GetMagzineAllottedData');
 
       if (response.statusCode != 200) {
         throw Exception('Failed to fetch data: ${response.body}');
@@ -393,33 +423,31 @@ class DBHandler {
             responseData['data']['productionTransferCases']);
         // Save productionTransferCases data
         await downloadProductionTransferCases(productionTransferCases);
-        // Save data to local database
-        await _database!.transaction((txn) async {
-          // Note: Cannot easily batch mixed queries and inserts with conditional logic
-          // But we can optimize by batching inserts if we pre-validated.
-          // For now, keeping the logic but using batch for cleaner code if possible?
-          // The logic requires checking existence for EACH item.
-          // Optimization: Prepare statement or keep as is.
-          // Keeping as is to ensure correctness of "upsert" logic without unique constraint.
-          for (var transfer in transferData) {
-            // Check if record already exists
-            final existingRecord = await txn.query(
-              'magzinestocktransfer',
-              where:
-                  'transfer_id = ? AND  bid = ?  AND sizecode = ? AND magazine_name = ? AND plant =?',
-              whereArgs: [
-                transfer['transferId'],
-                transfer['brandId'],
-                transfer['productSizecCode'],
-                transfer['magazineName'].toString().trim(),
-                transfer['plant'],
-              ],
-              limit: 1,
-            );
 
-            // Only insert if record doesn't exist
-            if (existingRecord.isEmpty) {
-              await txn.insert(
+        // Optimized: Fetch all existing composite keys upfront to avoid N+1 queries
+        final existingRecords = await db.query(
+          'magzinestocktransfer',
+          columns: ['transfer_id', 'bid', 'sizecode', 'magazine_name', 'plant'],
+        );
+
+        // Create a Set of composite keys for O(1) lookup
+        final existingKeys = existingRecords.map((r) {
+          return '${r['transfer_id']}_${r['bid']}_${r['sizecode']}_${r['magazine_name'].toString().trim()}_${r['plant']}';
+        }).toSet();
+
+        // Filter out records that already exist
+        final newRecords = transferData.where((transfer) {
+          final key =
+              '${transfer['transferId']}_${transfer['brandId']}_${transfer['productSizecCode']}_${transfer['magazineName'].toString().trim()}_${transfer['plant']}';
+          return !existingKeys.contains(key);
+        }).toList();
+
+        // Batch insert only new records
+        if (newRecords.isNotEmpty) {
+          await db.transaction((txn) async {
+            final batch = txn.batch();
+            for (var transfer in newRecords) {
+              batch.insert(
                 'magzinestocktransfer',
                 {
                   'transfer_id': transfer['transferId'],
@@ -438,8 +466,13 @@ class DBHandler {
                 conflictAlgorithm: ConflictAlgorithm.ignore,
               );
             }
-          }
-        });
+            await batch.commit(noResult: true);
+          });
+          debugPrint(
+              'Inserted ${newRecords.length} new magazine transfer records');
+        } else {
+          debugPrint('No new magazine transfer records to insert');
+        }
       } else {
         throw Exception('API response status is false');
       }
@@ -450,19 +483,38 @@ class DBHandler {
 
   // Sync production transfer data with API
   static Future<void> syncProductionScannedBox() async {
+    final db = await getDatabase();
+    if (db == null) {
+      throw Exception('Database not initialized');
+    }
     final transferData = await fetchAllTransferData();
+
+    // Early return if no data to sync
+    if (transferData.isEmpty) {
+      debugPrint('No production transfer data to sync');
+      return;
+    }
+
     final syncedTransIds = <int>{};
     final groupedData = <String, Map<String, dynamic>>{};
 
     for (var item in transferData) {
-      final transId = item['trans_id'] as String;
-      syncedTransIds.add(item['id'] as int);
+      // Defensive null checks to prevent crashes
+      final transId = item['trans_id']?.toString();
+      final id = item['id'] as int?;
+
+      if (transId == null || id == null) {
+        debugPrint('Skipping invalid transfer item: $item');
+        continue;
+      }
+
+      syncedTransIds.add(id);
 
       if (!groupedData.containsKey(transId)) {
         groupedData[transId] = {
           "id": 0,
           "transId": transId,
-          "truckNo": item['truck_no'],
+          "truckNo": item['truck_no'] ?? '',
           "allotflag": 0,
           "months": 0,
           "years": 0,
@@ -470,24 +522,26 @@ class DBHandler {
         };
       }
 
-      groupedData[transId]!['barcodes']!.add(
-          {"id": 0, "productionTransferId": 0, "l1Barcode": item['l1barcode']});
+      if (item['l1barcode'] != null) {
+        groupedData[transId]!['barcodes']!.add({
+          "id": 0,
+          "productionTransferId": 0,
+          "l1Barcode": item['l1barcode']
+        });
+      }
     }
 
     final apiData = groupedData.values.toList();
 
     if (apiData.isNotEmpty) {
-      final response = await http.post(
-        Uri.parse('$_apiBaseUrl/DownloadUploadData/SyncLoadBoxInTruckData'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode(apiData),
-      );
+      final response = await _httpPost(
+          '/DownloadUploadData/SyncLoadBoxInTruckData', apiData);
       debugPrint(response.body);
       if (response.statusCode != 200) {
         throw Exception('Failed to sync production data: ${response.body}');
       }
 
-      await _database!.transaction((txn) async {
+      await db.transaction((txn) async {
         final batch = txn.batch();
         for (int transId in syncedTransIds) {
           batch.delete(
@@ -525,10 +579,7 @@ class DBHandler {
   /// Fetch dispatch data from API and insert into local database
   static Future<void> fetchAndInsertDispatchData() async {
     try {
-      final response = await http.get(
-        Uri.parse('$_apiBaseUrl/DownloadUploadData/GetDispatchData'),
-        headers: {'Content-Type': 'application/json'},
-      );
+      final response = await _httpGet('/DownloadUploadData/GetDispatchData');
 
       if (response.statusCode != 200) {
         throw Exception('Failed to fetch dispatch data: ${response.body}');
@@ -599,9 +650,13 @@ class DBHandler {
 
   /// Sync scanned box data with API
   static Future<void> uploadUnloadCasesToMagzine() async {
+    final db = await getDatabase();
+    if (db == null) {
+      throw Exception('Database not initialized');
+    }
     try {
       // Fetch data from local database with join
-      final result = await _database!.rawQuery('''
+      final result = await db.rawQuery('''
         SELECT 
           m.id,
           m.transfer_id,
@@ -658,20 +713,17 @@ class DBHandler {
       }
 
       final apiData = groupedData.values.toList();
-      print(jsonEncode(apiData));
+      debugPrint(jsonEncode(apiData));
       if (apiData.isNotEmpty) {
-        final response = await http.post(
-          Uri.parse('$_apiBaseUrl/DownloadUploadData/SyncMagzineUnloadData'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode(apiData),
-        );
+        final response = await _httpPost(
+            '/DownloadUploadData/SyncMagzineUnloadData', apiData);
 
         if (response.statusCode != 200) {
           throw Exception('Failed to sync scanned box data: ${response.body}');
         }
 
         // Clear synced data efficiently
-        await _database!.transaction((txn) async {
+        await db.transaction((txn) async {
           final batch = txn.batch();
           // Delete grouped items by magazine transfer ID locally
           for (var id in groupedData.keys) {
@@ -700,6 +752,17 @@ class DBHandler {
   }) async {
     int retryCount = 0;
     final stopwatch = Stopwatch()..start();
+
+    // Ensure database is initialized before starting sync
+    if (_database == null) {
+      onProgress?.call(0.0, 'Initializing database...');
+      try {
+        await initDB();
+      } catch (e) {
+        debugPrint('Database initialization failed during sync: $e');
+        throw Exception('Database initialization failed: $e');
+      }
+    }
 
     while (retryCount < maxRetries) {
       try {
@@ -926,11 +989,8 @@ class DBHandler {
 
       debugPrint(jsonEncode(apiData)); // Debug print to check data structure
 
-      final response = await http.post(
-        Uri.parse('$_apiBaseUrl/DownloadUploadData/SyncCompletedLoadingSheets'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode(apiData),
-      );
+      final response = await _httpPost(
+          '/DownloadUploadData/SyncCompletedLoadingSheets', apiData);
 
       if (response.statusCode != 200) {
         throw Exception(
@@ -994,8 +1054,12 @@ class DBHandler {
 
   static Future<void> downloadProductionTransferCases(
       List<dynamic> productionTransferCases) async {
+    final db = await getDatabase();
+    if (db == null) {
+      throw Exception('Database not initialized');
+    }
     try {
-      await _database!.transaction((txn) async {
+      await db.transaction((txn) async {
         final batch = txn.batch();
         for (var transferCase in productionTransferCases) {
           batch.insert(

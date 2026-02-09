@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:getwidget/getwidget.dart';
 import '../Database/db_handler.dart';
+import '../core/app_theme.dart';
+import '../core/widgets.dart';
 import 'LoadingSheetDetailsPage.dart';
 
 class LoadingSheetReport extends StatefulWidget {
@@ -16,9 +17,10 @@ class _LoadingSheetReportState extends State<LoadingSheetReport> {
   bool _isLoading = true;
   String? _selectedDispatchType;
   List<String> _dispatchTypeList = [];
-  TextEditingController _searchController = TextEditingController();
+  final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
+  // ============ BUSINESS LOGIC (PRESERVED) ============
   @override
   void initState() {
     super.initState();
@@ -49,13 +51,7 @@ class _LoadingSheetReportState extends State<LoadingSheetReport> {
         _isLoading = false;
       });
       if (mounted) {
-        GFToast.showToast(
-          'Error loading data: $e',
-          context,
-          toastPosition: GFToastPosition.BOTTOM,
-          textStyle: const TextStyle(fontSize: 16, color: Colors.white),
-          backgroundColor: GFColors.DANGER,
-        );
+        _showSnackBar('Error loading data: $e', AppTheme.error);
       }
     }
   }
@@ -77,14 +73,12 @@ class _LoadingSheetReportState extends State<LoadingSheetReport> {
   void _applyFilters() {
     List<Map<String, dynamic>> filtered = _loadingData;
 
-    // Apply dispatch type filter
     if (_selectedDispatchType != null) {
       filtered = filtered
           .where((data) => data['typeoofdispatc'] == _selectedDispatchType)
           .toList();
     }
 
-    // Apply search filter
     if (_searchQuery.isNotEmpty) {
       filtered = filtered.where((item) {
         return item['loadingno']
@@ -117,23 +111,43 @@ class _LoadingSheetReportState extends State<LoadingSheetReport> {
   int get _completedCount => _filteredData
       .where((item) => (item['complete_flag'] as int? ?? 0) == 1)
       .length;
+  // ============ END BUSINESS LOGIC ============
+
+  void _showSnackBar(String message, Color color) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(
+              color == AppTheme.success
+                  ? Icons.check_circle
+                  : color == AppTheme.info
+                      ? Icons.info_outline
+                      : Icons.error_outline,
+              color: Colors.white,
+            ),
+            const SizedBox(width: AppTheme.spaceSM),
+            Expanded(child: Text(message)),
+          ],
+        ),
+        backgroundColor: color,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: AppTheme.borderRadiusMD),
+        margin: AppTheme.paddingMD,
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: GFAppBar(
-        title: const Text(
-          'Loading Sheet Report',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 20,
-          ),
-        ),
-        backgroundColor: Colors.blue[700],
-        centerTitle: true,
+      resizeToAvoidBottomInset: true,
+      appBar: CustomAppBar(
+        title: 'Loading Sheet Report',
+        backgroundColor: AppTheme.moduleMagazine,
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh, color: Colors.white),
+            icon: const Icon(Icons.refresh_rounded, color: Colors.white),
             onPressed: () {
               setState(() {
                 _isLoading = true;
@@ -143,371 +157,454 @@ class _LoadingSheetReportState extends State<LoadingSheetReport> {
               });
               _loadLoadingData();
             },
+            tooltip: 'Refresh',
           ),
         ],
       ),
-      body: Stack(
-        children: [
-          // Background image
-          Container(
-            decoration: const BoxDecoration(
-              image: DecorationImage(
-                image: AssetImage('assets/images/pexels-hngstrm-1939485.jpg'),
-                fit: BoxFit.cover,
-              ),
-            ),
-          ),
-          // Content
-          _isLoading
+      body: GradientBackground(
+        child: SafeArea(
+          child: _isLoading
               ? const Center(child: CircularProgressIndicator())
               : Column(
                   children: [
                     // Search Bar
-                    Card(
-                      margin: const EdgeInsets.all(12.0),
-                      elevation: 6,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(12.0),
-                        child: TextField(
-                          controller: _searchController,
-                          decoration: InputDecoration(
-                            hintText:
-                                'Search by Loading No, Truck, Brand, or Product...',
-                            prefixIcon: const Icon(Icons.search),
-                            suffixIcon: _searchQuery.isNotEmpty
-                                ? IconButton(
-                                    icon: const Icon(Icons.clear),
-                                    onPressed: () {
-                                      _searchController.clear();
-                                      _filterBySearch('');
-                                    },
-                                  )
-                                : null,
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide.none,
-                            ),
-                            filled: true,
-                            fillColor: Colors.grey[100],
-                          ),
-                          onChanged: _filterBySearch,
-                        ),
-                      ),
-                    ),
-                    // Filter Chips
-                    if (_dispatchTypeList.isNotEmpty)
-                      Container(
-                        height: 60,
-                        margin: const EdgeInsets.symmetric(horizontal: 12.0),
-                        child: ListView(
-                          scrollDirection: Axis.horizontal,
-                          children: [
-                            FilterChip(
-                              label: const Text('All Types'),
-                              selected: _selectedDispatchType == null,
-                              onSelected: (selected) {
-                                _filterByDispatchType(null);
-                              },
-                              selectedColor: Colors.blue[300],
-                              backgroundColor: Colors.grey[200],
-                            ),
-                            const SizedBox(width: 8),
-                            ..._dispatchTypeList.map(
-                              (type) => Padding(
-                                padding: const EdgeInsets.only(right: 8.0),
-                                child: FilterChip(
-                                  label: Text(type),
-                                  selected: _selectedDispatchType == type,
-                                  onSelected: (selected) {
-                                    _filterByDispatchType(type);
-                                  },
-                                  selectedColor: Colors.blue[300],
-                                  backgroundColor: Colors.grey[200],
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    const SizedBox(height: 12),
-                    // Summary Cards
                     Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                      padding: AppTheme.paddingMD,
+                      child: _buildSearchBar(),
+                    ),
+
+                    // Filter Chips
+                    if (_dispatchTypeList.isNotEmpty) _buildFilterChips(),
+                    const SizedBox(height: AppTheme.spaceMD),
+
+                    // Summary Stats
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: AppTheme.spaceMD),
                       child: Row(
                         children: [
-                          _buildSummaryCard('Total Sheets',
-                              '${_filteredData.length}', Colors.blue[700]!),
-                          const SizedBox(width: 12),
-                          _buildSummaryCard(
-                              'Pending', '$_pendingCount', Colors.orange[700]!),
-                          const SizedBox(width: 12),
-                          _buildSummaryCard('Completed', '$_completedCount',
-                              Colors.green[700]!),
+                          Expanded(
+                            child: StatCard(
+                              title: 'Total',
+                              value: '${_filteredData.length}',
+                              color: AppTheme.moduleMagazine,
+                              icon: Icons.description_rounded,
+                              compact: true,
+                            ),
+                          ),
+                          const SizedBox(width: AppTheme.spaceSM),
+                          Expanded(
+                            child: StatCard(
+                              title: 'Pending',
+                              value: '$_pendingCount',
+                              color: AppTheme.warning,
+                              icon: Icons.pending_actions,
+                              compact: true,
+                            ),
+                          ),
+                          const SizedBox(width: AppTheme.spaceSM),
+                          Expanded(
+                            child: StatCard(
+                              title: 'Completed',
+                              value: '$_completedCount',
+                              color: AppTheme.success,
+                              icon: Icons.check_circle,
+                              compact: true,
+                            ),
+                          ),
                         ],
                       ),
                     ),
-                    const SizedBox(height: 12),
-                    // Data Display Card List
-                    Expanded(
-                      child: Card(
-                        margin: const EdgeInsets.all(12.0),
-                        elevation: 6,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Column(
-                          children: [
-                            // Header with count
-                            Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: Colors.blue[800],
-                                borderRadius: const BorderRadius.vertical(
-                                    top: Radius.circular(12)),
-                              ),
-                              child: Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  const Text(
-                                    'Loading Sheet Details',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 12, vertical: 6),
-                                    decoration: BoxDecoration(
-                                      color: Colors.white.withOpacity(0.2),
-                                      borderRadius: BorderRadius.circular(20),
-                                    ),
-                                    child: Text(
-                                      '${_filteredData.length} Records',
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            // List of data
-                            Expanded(
-                              child: _filteredData.isEmpty
-                                  ? const Center(
-                                      child: Text(
-                                        'No loading sheets found',
-                                        style: TextStyle(
-                                            fontSize: 16, color: Colors.grey),
-                                      ),
-                                    )
-                                  : ListView.builder(
-                                      padding: const EdgeInsets.all(8),
-                                      itemCount: _filteredData.length,
-                                      itemBuilder: (context, index) {
-                                        final data = _filteredData[index];
-                                        final loadingSheetId =
-                                            data['id'] as int?;
-                                        final loadingSheetNo =
-                                            data['loadingno'] as String?;
-                                        final completeFlag =
-                                            data['complete_flag'] as int? ?? 0;
+                    const SizedBox(height: AppTheme.spaceMD),
 
-                                        return Card(
-                                          margin: const EdgeInsets.symmetric(
-                                              vertical: 4),
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius:
-                                                BorderRadius.circular(12),
-                                          ),
-                                          elevation: 2,
-                                          child: ListTile(
-                                            onTap: () {
-                                              if (loadingSheetId != null &&
-                                                  loadingSheetNo != null) {
-                                                Navigator.push(
-                                                  context,
-                                                  MaterialPageRoute(
-                                                    builder: (context) =>
-                                                        LoadingSheetDetailsPage(
-                                                      loadingSheetId:
-                                                          loadingSheetId,
-                                                      loadingSheetNo:
-                                                          loadingSheetNo,
-                                                    ),
-                                                  ),
-                                                );
-                                              } else {
-                                                ScaffoldMessenger.of(context)
-                                                    .showSnackBar(
-                                                  const SnackBar(
-                                                    content: Text(
-                                                        'Loading Sheet ID or Number is missing.'),
-                                                    backgroundColor:
-                                                        Colors.orange,
-                                                  ),
-                                                );
-                                              }
-                                            },
-                                            title: Text(
-                                              'LoadSheet: ${loadingSheetNo ?? 'N/A'}',
-                                              style: const TextStyle(
-                                                  fontWeight: FontWeight.bold),
-                                            ),
-                                            subtitle: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                const SizedBox(height: 4),
-                                                _buildDataRow('Truck No',
-                                                    data['truckno'] ?? 'N/A'),
-                                                _buildDataRow('T Name',
-                                                    data['tname'] ?? 'N/A'),
-                                                _buildDataRow('Brand',
-                                                    '${data['bname'] ?? 'N/A'} (ID: ${data['bid'] ?? 'N/A'})'),
-                                                _buildDataRow('Product',
-                                                    '${data['product'] ?? 'N/A'} (${data['pcode'] ?? 'N/A'})'),
-                                                _buildDataRow(
-                                                    'Dispatch Type',
-                                                    data['typeoofdispatc'] ??
-                                                        'N/A'),
-                                                _buildDataRow('Magazine',
-                                                    data['magzine'] ?? 'N/A'),
-                                                _buildDataRow('Load Wt',
-                                                    '${data['loadwt'] ?? 'N/A'} kg'),
-                                                _buildDataRow(
-                                                    'Load Cases',
-                                                    data['laodcases']
-                                                            ?.toString() ??
-                                                        'N/A'),
-                                                const SizedBox(height: 4),
-                                                Row(
-                                                  children: [
-                                                    const Text(
-                                                      'Status: ',
-                                                      style: TextStyle(
-                                                          fontWeight:
-                                                              FontWeight.bold),
-                                                    ),
-                                                    Container(
-                                                      padding: const EdgeInsets
-                                                          .symmetric(
-                                                        horizontal: 12,
-                                                        vertical: 6,
-                                                      ),
-                                                      decoration: BoxDecoration(
-                                                        color: completeFlag == 1
-                                                            ? Colors.green
-                                                            : Colors.orange,
-                                                        borderRadius:
-                                                            BorderRadius
-                                                                .circular(20),
-                                                      ),
-                                                      child: Text(
-                                                        completeFlag == 1
-                                                            ? 'Completed'
-                                                            : 'Pending',
-                                                        style: const TextStyle(
-                                                          color: Colors.white,
-                                                          fontWeight:
-                                                              FontWeight.bold,
-                                                          fontSize: 14,
-                                                        ),
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ],
-                                            ),
-                                            trailing: const Icon(
-                                                Icons.arrow_forward_ios,
-                                                size: 16),
-                                          ),
-                                        );
-                                      },
-                                    ),
-                            ),
-                          ],
-                        ),
-                      ),
+                    // Data Display
+                    Expanded(
+                      child: _buildDataList(),
                     ),
                   ],
                 ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSearchBar() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: AppTheme.borderRadiusMD,
+        boxShadow: AppTheme.shadowSM,
+      ),
+      padding: AppTheme.paddingSM,
+      child: TextField(
+        controller: _searchController,
+        style: AppTheme.bodyMedium,
+        decoration: InputDecoration(
+          hintText: 'Search by Loading No, Truck, Brand, or Product...',
+          prefixIcon: Icon(Icons.search, color: AppTheme.textTertiary),
+          suffixIcon: _searchQuery.isNotEmpty
+              ? IconButton(
+                  icon: Icon(Icons.clear, color: AppTheme.textTertiary),
+                  onPressed: () {
+                    _searchController.clear();
+                    _filterBySearch('');
+                  },
+                )
+              : null,
+          border: OutlineInputBorder(
+            borderRadius: AppTheme.borderRadiusMD,
+            borderSide: BorderSide.none,
+          ),
+          filled: true,
+          fillColor: AppTheme.surfaceVariant,
+          contentPadding: AppTheme.paddingMD,
+        ),
+        onChanged: _filterBySearch,
+      ),
+    );
+  }
+
+  Widget _buildFilterChips() {
+    return Container(
+      height: 50,
+      margin: const EdgeInsets.symmetric(horizontal: AppTheme.spaceMD),
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        children: [
+          FilterChip(
+            label: const Text('All Types'),
+            selected: _selectedDispatchType == null,
+            onSelected: (selected) {
+              _filterByDispatchType(null);
+            },
+            selectedColor: AppTheme.moduleMagazine.withOpacity(0.3),
+            backgroundColor: Colors.white,
+            labelStyle: TextStyle(
+              color: _selectedDispatchType == null
+                  ? AppTheme.moduleMagazine
+                  : AppTheme.textSecondary,
+              fontWeight: _selectedDispatchType == null
+                  ? FontWeight.bold
+                  : FontWeight.normal,
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: AppTheme.borderRadiusSM,
+              side: BorderSide(
+                color: _selectedDispatchType == null
+                    ? AppTheme.moduleMagazine
+                    : AppTheme.backgroundAlt,
+              ),
+            ),
+          ),
+          const SizedBox(width: AppTheme.spaceSM),
+          ..._dispatchTypeList.map(
+            (type) => Padding(
+              padding: const EdgeInsets.only(right: AppTheme.spaceSM),
+              child: FilterChip(
+                label: Text(type),
+                selected: _selectedDispatchType == type,
+                onSelected: (selected) {
+                  _filterByDispatchType(type);
+                },
+                selectedColor: AppTheme.moduleMagazine.withOpacity(0.3),
+                backgroundColor: Colors.white,
+                labelStyle: TextStyle(
+                  color: _selectedDispatchType == type
+                      ? AppTheme.moduleMagazine
+                      : AppTheme.textSecondary,
+                  fontWeight: _selectedDispatchType == type
+                      ? FontWeight.bold
+                      : FontWeight.normal,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: AppTheme.borderRadiusSM,
+                  side: BorderSide(
+                    color: _selectedDispatchType == type
+                        ? AppTheme.moduleMagazine
+                        : AppTheme.backgroundAlt,
+                  ),
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildSummaryCard(String title, String value, Color color) {
-    return Expanded(
-      child: Card(
-        elevation: 4,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                color.withOpacity(0.9),
-                color.withOpacity(0.7),
+  Widget _buildDataList() {
+    return Container(
+      margin: AppTheme.paddingMD,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: AppTheme.borderRadiusMD,
+        boxShadow: AppTheme.shadowSM,
+      ),
+      child: Column(
+        children: [
+          // Header
+          Container(
+            padding: AppTheme.paddingMD,
+            decoration: BoxDecoration(
+              gradient: AppTheme.moduleGradient(AppTheme.moduleMagazine),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(AppTheme.radiusMD),
+              ),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.description_rounded,
+                        color: Colors.white, size: 20),
+                    const SizedBox(width: AppTheme.spaceSM),
+                    Text(
+                      'Loading Sheet Details',
+                      style: AppTheme.titleSmall.copyWith(color: Colors.white),
+                    ),
+                  ],
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppTheme.spaceMD,
+                    vertical: AppTheme.spaceXS,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(AppTheme.radiusCircle),
+                  ),
+                  child: Text(
+                    '${_filteredData.length} Records',
+                    style: AppTheme.labelMedium.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
               ],
             ),
-            borderRadius: BorderRadius.circular(12),
           ),
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                value,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                title,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ],
+          // List
+          Expanded(
+            child: _filteredData.isEmpty
+                ? const EmptyState(
+                    message:
+                        'No loading sheets found.\nTry adjusting your filters.',
+                    icon: Icons.search_off_rounded,
+                  )
+                : ListView.builder(
+                    padding: AppTheme.paddingXS,
+                    itemCount: _filteredData.length,
+                    itemBuilder: (context, index) {
+                      final data = _filteredData[index];
+                      final loadingSheetId = data['id'] as int?;
+                      final loadingSheetNo = data['loadingno'] as String?;
+                      final completeFlag = data['complete_flag'] as int? ?? 0;
+                      final isCompleted = completeFlag == 1;
+
+                      return Container(
+                        margin: const EdgeInsets.symmetric(
+                          horizontal: AppTheme.spaceXS,
+                          vertical: AppTheme.spaceXS,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppTheme.surface,
+                          borderRadius: AppTheme.borderRadiusMD,
+                          border: Border.all(
+                            color: isCompleted
+                                ? AppTheme.success.withOpacity(0.3)
+                                : AppTheme.warning.withOpacity(0.3),
+                          ),
+                        ),
+                        child: Material(
+                          color: Colors.transparent,
+                          borderRadius: AppTheme.borderRadiusMD,
+                          child: InkWell(
+                            borderRadius: AppTheme.borderRadiusMD,
+                            onTap: () {
+                              if (loadingSheetId != null &&
+                                  loadingSheetNo != null) {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        LoadingSheetDetailsPage(
+                                      loadingSheetId: loadingSheetId,
+                                      loadingSheetNo: loadingSheetNo,
+                                    ),
+                                  ),
+                                );
+                              } else {
+                                _showSnackBar(
+                                    'Loading Sheet ID or Number is missing.',
+                                    AppTheme.warning);
+                              }
+                            },
+                            child: Padding(
+                              padding: AppTheme.paddingMD,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  // Header row
+                                  Row(
+                                    children: [
+                                      Container(
+                                        padding: AppTheme.paddingSM,
+                                        decoration: BoxDecoration(
+                                          color: isCompleted
+                                              ? AppTheme.successSurface
+                                              : AppTheme.warningSurface,
+                                          borderRadius: AppTheme.borderRadiusSM,
+                                        ),
+                                        child: Icon(
+                                          isCompleted
+                                              ? Icons.check_circle
+                                              : Icons.pending,
+                                          color: isCompleted
+                                              ? AppTheme.success
+                                              : AppTheme.warning,
+                                          size: 18,
+                                        ),
+                                      ),
+                                      const SizedBox(width: AppTheme.spaceMD),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              'Sheet: ${loadingSheetNo ?? 'N/A'}',
+                                              style: AppTheme.titleSmall,
+                                            ),
+                                            const SizedBox(
+                                                height: AppTheme.spaceXXS),
+                                            Text(
+                                              'Truck: ${data['truckno'] ?? 'N/A'}',
+                                              style: AppTheme.labelSmall,
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      Icon(
+                                        Icons.arrow_forward_ios_rounded,
+                                        color: AppTheme.textTertiary,
+                                        size: 16,
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: AppTheme.spaceMD),
+                                  // Details
+                                  Wrap(
+                                    spacing: AppTheme.spaceMD,
+                                    runSpacing: AppTheme.spaceXS,
+                                    children: [
+                                      _buildInfoChip(Icons.inventory,
+                                          data['bname'] ?? 'N/A'),
+                                      _buildInfoChip(Icons.category,
+                                          data['product'] ?? 'N/A'),
+                                      _buildInfoChip(Icons.local_shipping,
+                                          data['typeoofdispatc'] ?? 'N/A'),
+                                      _buildInfoChip(Icons.warehouse,
+                                          data['magzine'] ?? 'N/A'),
+                                    ],
+                                  ),
+                                  const SizedBox(height: AppTheme.spaceSM),
+                                  // Stats row
+                                  Row(
+                                    children: [
+                                      _buildStatBadge(
+                                          'Cases',
+                                          data['laodcases']?.toString() ?? '0',
+                                          AppTheme.moduleMagazine),
+                                      const SizedBox(width: AppTheme.spaceSM),
+                                      _buildStatBadge(
+                                          'Weight',
+                                          '${data['loadwt'] ?? 0} kg',
+                                          AppTheme.info),
+                                      const Spacer(),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: AppTheme.spaceSM,
+                                          vertical: AppTheme.spaceXXS,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: isCompleted
+                                              ? AppTheme.success
+                                              : AppTheme.warning,
+                                          borderRadius: BorderRadius.circular(
+                                              AppTheme.radiusCircle),
+                                        ),
+                                        child: Text(
+                                          isCompleted ? 'DONE' : 'PENDING',
+                                          style: AppTheme.labelSmall.copyWith(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
           ),
-        ),
+        ],
       ),
     );
   }
 
-  Widget _buildDataRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2.0),
+  Widget _buildInfoChip(IconData icon, String value) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppTheme.spaceSM,
+        vertical: AppTheme.spaceXXS,
+      ),
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceVariant,
+        borderRadius: AppTheme.borderRadiusSM,
+      ),
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          SizedBox(
-            width: 100,
-            child: Text(
-              '$label:',
-              style: const TextStyle(fontSize: 14),
-            ),
+          Icon(icon, size: 12, color: AppTheme.textTertiary),
+          const SizedBox(width: AppTheme.spaceXS),
+          Text(
+            value,
+            style: AppTheme.labelSmall,
           ),
-          Expanded(
-            child: Text(
-              value,
-              style: const TextStyle(fontSize: 14),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatBadge(String label, String value, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppTheme.spaceSM,
+        vertical: AppTheme.spaceXXS,
+      ),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: AppTheme.borderRadiusSM,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '$label: ',
+            style: AppTheme.labelSmall.copyWith(color: AppTheme.textSecondary),
+          ),
+          Text(
+            value,
+            style: AppTheme.labelSmall.copyWith(
+              color: color,
+              fontWeight: FontWeight.bold,
             ),
           ),
         ],

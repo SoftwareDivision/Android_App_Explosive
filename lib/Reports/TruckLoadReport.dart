@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:getwidget/getwidget.dart';
 import '../Database/db_handler.dart';
+import '../core/app_theme.dart';
+import '../core/widgets.dart' hide DataRow;
 
 class TruckLoadReport extends StatefulWidget {
   const TruckLoadReport({super.key});
@@ -13,9 +14,10 @@ class _TruckLoadReportState extends State<TruckLoadReport> {
   List<Map<String, dynamic>> _transferData = [];
   List<Map<String, dynamic>> _filteredData = [];
   bool _isLoading = true;
-  TextEditingController _searchController = TextEditingController();
+  final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
+  // ============ BUSINESS LOGIC (PRESERVED) ============
   @override
   void initState() {
     super.initState();
@@ -41,13 +43,7 @@ class _TruckLoadReportState extends State<TruckLoadReport> {
         _isLoading = false;
       });
       if (mounted) {
-        GFToast.showToast(
-          'Error loading data: $e',
-          context,
-          toastPosition: GFToastPosition.BOTTOM,
-          textStyle: const TextStyle(fontSize: 16, color: Colors.white),
-          backgroundColor: Colors.red,
-        );
+        _showSnackBar('Error loading data: $e', AppTheme.error);
       }
     }
   }
@@ -77,265 +73,272 @@ class _TruckLoadReportState extends State<TruckLoadReport> {
   }
 
   void _exportData() {
-    // TODO: Implement data export functionality
+    _showSnackBar('Export functionality coming soon!', AppTheme.info);
+  }
+  // ============ END BUSINESS LOGIC ============
+
+  void _showSnackBar(String message, Color color) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Export functionality coming soon!'),
-        backgroundColor: Colors.blue,
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(
+              color == AppTheme.success
+                  ? Icons.check_circle
+                  : color == AppTheme.info
+                      ? Icons.info_outline
+                      : Icons.error_outline,
+              color: Colors.white,
+            ),
+            const SizedBox(width: AppTheme.spaceSM),
+            Expanded(child: Text(message)),
+          ],
+        ),
+        backgroundColor: color,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: AppTheme.borderRadiusMD),
+        margin: AppTheme.paddingMD,
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final uniqueTrucks = _filteredData.map((e) => e['truck_no']).toSet().length;
+
     return Scaffold(
-      appBar: GFAppBar(
-        title: const Text(
-          'Truck Load Report',
-          style: TextStyle(color: Colors.white, fontSize: 20),
-        ),
-        backgroundColor: Colors.blue[800],
-        centerTitle: true,
+      resizeToAvoidBottomInset: true,
+      appBar: CustomAppBar(
+        title: 'Truck Load Report',
+        backgroundColor: AppTheme.moduleProduction,
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh_rounded, color: Colors.white),
             onPressed: () {
               setState(() {
                 _isLoading = true;
               });
               _loadTransferData();
             },
+            tooltip: 'Refresh',
           ),
           IconButton(
-            icon: const Icon(Icons.download),
+            icon: const Icon(Icons.download_rounded, color: Colors.white),
             onPressed: _exportData,
+            tooltip: 'Export',
           ),
         ],
       ),
-      body: Stack(
-        children: [
-          // Background image
-          Container(
-            decoration: const BoxDecoration(
-              image: DecorationImage(
-                image: AssetImage('assets/images/pexels-hngstrm-1939485.jpg'),
-                fit: BoxFit.cover,
-              ),
-            ),
-          ),
-          // Content
-          _isLoading
+      body: GradientBackground(
+        child: SafeArea(
+          child: _isLoading
               ? const Center(child: CircularProgressIndicator())
               : Column(
                   children: [
                     // Search Bar
-                    Card(
-                      margin: const EdgeInsets.all(12.0),
-                      elevation: 6,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(12.0),
-                        child: TextField(
-                          controller: _searchController,
-                          decoration: InputDecoration(
-                            hintText:
-                                'Search by Truck No, Barcode, or Transfer ID...',
-                            prefixIcon: const Icon(Icons.search),
-                            suffixIcon: _searchQuery.isNotEmpty
-                                ? IconButton(
-                                    icon: const Icon(Icons.clear),
-                                    onPressed: () {
-                                      _searchController.clear();
-                                      _filterData('');
-                                    },
-                                  )
-                                : null,
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide.none,
-                            ),
-                            filled: true,
-                            fillColor: Colors.grey[100],
-                          ),
-                          onChanged: _filterData,
-                        ),
-                      ),
-                    ),
-                    // Summary Cards
                     Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                      padding: AppTheme.paddingMD,
+                      child: _buildSearchBar(),
+                    ),
+
+                    // Summary Stats
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: AppTheme.spaceMD),
                       child: Row(
                         children: [
-                          _buildSummaryCard('Total Boxes',
-                              '${_filteredData.length}', Colors.blue[700]!),
-                          const SizedBox(width: 12),
-                          _buildSummaryCard(
-                              'Unique Trucks',
-                              '${_filteredData.map((e) => e['truck_no']).toSet().length}',
-                              Colors.green[700]!),
+                          Expanded(
+                            child: StatCard(
+                              title: 'Total Boxes',
+                              value: '${_filteredData.length}',
+                              color: AppTheme.moduleProduction,
+                              icon: Icons.inventory_2_rounded,
+                              compact: true,
+                            ),
+                          ),
+                          const SizedBox(width: AppTheme.spaceMD),
+                          Expanded(
+                            child: StatCard(
+                              title: 'Unique Trucks',
+                              value: '$uniqueTrucks',
+                              color: AppTheme.success,
+                              icon: Icons.local_shipping_rounded,
+                              compact: true,
+                            ),
+                          ),
                         ],
                       ),
                     ),
-                    const SizedBox(height: 12),
-                    // Data Table Card
+                    const SizedBox(height: AppTheme.spaceMD),
+
+                    // Data Table
                     Expanded(
-                      child: Card(
-                        margin: const EdgeInsets.all(12.0),
-                        elevation: 6,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Column(
-                          children: [
-                            // Header with count
-                            Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: Colors.blue[800],
-                                borderRadius: const BorderRadius.vertical(
-                                    top: Radius.circular(12)),
-                              ),
-                              child: Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  const Text(
-                                    'Loading Details',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 12, vertical: 6),
-                                    decoration: BoxDecoration(
-                                      color: Colors.white.withOpacity(0.2),
-                                      borderRadius: BorderRadius.circular(20),
-                                    ),
-                                    child: Text(
-                                      '${_filteredData.length} Records',
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            // Data table
-                            Expanded(
-                              child: SingleChildScrollView(
-                                scrollDirection: Axis.horizontal,
-                                child: SingleChildScrollView(
-                                  child: DataTable(
-                                    headingRowColor:
-                                        MaterialStateColor.resolveWith(
-                                      (states) => Colors.blue[100]!,
-                                    ),
-                                    headingTextStyle: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black87,
-                                    ),
-                                    columns: const [
-                                      DataColumn(label: Text('Truck No')),
-                                      DataColumn(label: Text('L1 Barcode')),
-                                      DataColumn(label: Text('Transfer ID')),
-                                    ],
-                                    rows: _filteredData.map(
-                                      (data) {
-                                        return DataRow(
-                                          cells: [
-                                            DataCell(
-                                              Container(
-                                                padding:
-                                                    const EdgeInsets.all(8),
-                                                child: Text(
-                                                    data['truck_no'] ?? 'N/A'),
-                                              ),
-                                            ),
-                                            DataCell(
-                                              Container(
-                                                padding:
-                                                    const EdgeInsets.all(8),
-                                                child: Text(
-                                                    data['l1barcode'] ?? 'N/A'),
-                                              ),
-                                            ),
-                                            DataCell(
-                                              Container(
-                                                padding:
-                                                    const EdgeInsets.all(8),
-                                                child: Text(
-                                                    data['trans_id'] ?? 'N/A'),
-                                              ),
-                                            ),
-                                          ],
-                                        );
-                                      },
-                                    ).toList(),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                      child: _buildDataTable(),
                     ),
                   ],
                 ),
-        ],
+        ),
       ),
     );
   }
 
-  Widget _buildSummaryCard(String title, String value, Color color) {
-    return Expanded(
-      child: Card(
-        elevation: 4,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
+  Widget _buildSearchBar() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: AppTheme.borderRadiusMD,
+        boxShadow: AppTheme.shadowSM,
+      ),
+      padding: AppTheme.paddingSM,
+      child: TextField(
+        controller: _searchController,
+        style: AppTheme.bodyMedium,
+        decoration: InputDecoration(
+          hintText: 'Search by Truck No, Barcode, or Transfer ID...',
+          prefixIcon: Icon(Icons.search, color: AppTheme.textTertiary),
+          suffixIcon: _searchQuery.isNotEmpty
+              ? IconButton(
+                  icon: Icon(Icons.clear, color: AppTheme.textTertiary),
+                  onPressed: () {
+                    _searchController.clear();
+                    _filterData('');
+                  },
+                )
+              : null,
+          border: OutlineInputBorder(
+            borderRadius: AppTheme.borderRadiusMD,
+            borderSide: BorderSide.none,
+          ),
+          filled: true,
+          fillColor: AppTheme.surfaceVariant,
+          contentPadding: AppTheme.paddingMD,
         ),
-        child: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                color.withOpacity(0.9),
-                color.withOpacity(0.7),
+        onChanged: _filterData,
+      ),
+    );
+  }
+
+  Widget _buildDataTable() {
+    return Container(
+      margin: AppTheme.paddingMD,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: AppTheme.borderRadiusMD,
+        boxShadow: AppTheme.shadowSM,
+      ),
+      child: Column(
+        children: [
+          // Header
+          Container(
+            padding: AppTheme.paddingMD,
+            decoration: BoxDecoration(
+              gradient: AppTheme.moduleGradient(AppTheme.moduleProduction),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(AppTheme.radiusMD),
+              ),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.list_alt, color: Colors.white, size: 20),
+                    const SizedBox(width: AppTheme.spaceSM),
+                    Text(
+                      'Loading Details',
+                      style: AppTheme.titleSmall.copyWith(color: Colors.white),
+                    ),
+                  ],
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppTheme.spaceMD,
+                    vertical: AppTheme.spaceXS,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(AppTheme.radiusCircle),
+                  ),
+                  child: Text(
+                    '${_filteredData.length} Records',
+                    style: AppTheme.labelMedium.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
               ],
             ),
-            borderRadius: BorderRadius.circular(12),
           ),
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                value,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                title,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ],
+          // Table Content
+          Expanded(
+            child: _filteredData.isEmpty
+                ? const EmptyState(
+                    message: 'No records found.\nTry adjusting your search.',
+                    icon: Icons.search_off_rounded,
+                  )
+                : SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: SingleChildScrollView(
+                      child: DataTable(
+                        headingRowColor: WidgetStateColor.resolveWith(
+                          (states) => AppTheme.surfaceVariant,
+                        ),
+                        headingTextStyle: AppTheme.labelMedium.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: AppTheme.textPrimary,
+                        ),
+                        dataTextStyle: AppTheme.bodySmall,
+                        columnSpacing: AppTheme.spaceLG,
+                        columns: const [
+                          DataColumn(label: Text('Truck No')),
+                          DataColumn(label: Text('L1 Barcode')),
+                          DataColumn(label: Text('Transfer ID')),
+                        ],
+                        rows: _filteredData.map((data) {
+                          return DataRow(
+                            cells: [
+                              DataCell(
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: AppTheme.spaceSM,
+                                    vertical: AppTheme.spaceXS,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.primarySurface,
+                                    borderRadius: AppTheme.borderRadiusSM,
+                                  ),
+                                  child: Text(
+                                    data['truck_no'] ?? 'N/A',
+                                    style: AppTheme.labelMedium.copyWith(
+                                      color: AppTheme.primary,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              DataCell(
+                                Text(
+                                  data['l1barcode'] ?? 'N/A',
+                                  style: AppTheme.bodySmall.copyWith(
+                                    fontFamily: 'monospace',
+                                  ),
+                                ),
+                              ),
+                              DataCell(
+                                Text(
+                                  data['trans_id'] ?? 'N/A',
+                                  style: AppTheme.bodySmall,
+                                ),
+                              ),
+                            ],
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ),
           ),
-        ),
+        ],
       ),
     );
   }

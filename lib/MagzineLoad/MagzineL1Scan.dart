@@ -1,8 +1,9 @@
 import 'package:audioplayers/audioplayers.dart';
 import 'package:explosive_android_app/Database/db_handler.dart';
+import 'package:explosive_android_app/core/app_theme.dart';
+import 'package:explosive_android_app/core/widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:getwidget/getwidget.dart';
 import 'package:vibration/vibration.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
@@ -29,6 +30,7 @@ class _L1BoxScanPageState extends State<L1BoxScanPage> {
   bool _isSaving = false;
   bool _isLoadingInitialData = true;
 
+  // ============ BUSINESS LOGIC (PRESERVED) ============
   @override
   void initState() {
     super.initState();
@@ -62,19 +64,10 @@ class _L1BoxScanPageState extends State<L1BoxScanPage> {
     try {
       setState(() => _isLoadingInitialData = true);
 
-      // Extract target cases and brand ID
       _targetCases = int.tryParse(
               widget.loadingSheetData['laodcases']?.toString() ?? '0') ??
           0;
       bid = widget.loadingSheetData['bid'] ?? '';
-
-      // Load any previously saved barcodes
-      // final loadingSheetId = widget.loadingSheetData['id'];
-      // if (loadingSheetId != null) {
-      //   final savedBarcodes = await DBHandler.getLoadingCases(loadingSheetId);
-      //   _scannedBarcodes = savedBarcodes;
-      //   _scannedCount = _scannedBarcodes.length;
-      // }
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
@@ -83,12 +76,7 @@ class _L1BoxScanPageState extends State<L1BoxScanPage> {
       });
     } catch (e) {
       debugPrint('Error loading initial data: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error loading data: ${e.toString()}'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      _showSnackBar('Error loading data: ${e.toString()}', AppTheme.error);
     } finally {
       if (mounted) {
         setState(() => _isLoadingInitialData = false);
@@ -137,46 +125,29 @@ class _L1BoxScanPageState extends State<L1BoxScanPage> {
   Future<void> _handleScan(String barcode) async {
     if (_scannedCount == _targetCases) {
       await _playSound('music/goodread.wav');
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Scan complete! All cases scanned.'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      _showSnackBar('Scan complete! All cases scanned.', AppTheme.success);
       return;
     }
 
     final trimmedBarcode = barcode.trim();
 
-    // Validate barcode length
     if (trimmedBarcode.length != 27) {
       _clearScanFieldAndSetFocus();
       await _vibrateOnError();
       await _playSound('music/badread.wav');
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Invalid barcode length (must be 27 characters)'),
-          backgroundColor: Colors.redAccent,
-        ),
-      );
+      _showSnackBar(
+          'Invalid barcode length (must be 27 characters)', AppTheme.error);
       return;
     }
 
-    // Validate brand ID match
     if (!trimmedBarcode.contains(bid)) {
       _clearScanFieldAndSetFocus();
       await _vibrateOnError();
       await _playSound('music/badread.wav');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Barcode does not match Brand ID $bid'),
-          backgroundColor: Colors.redAccent,
-        ),
-      );
+      _showSnackBar('Barcode does not match Brand ID $bid', AppTheme.error);
       return;
     }
 
-    // Handle valid barcode
     if (!_scannedBarcodes.contains(trimmedBarcode)) {
       setState(() {
         _scannedBarcodes.add(trimmedBarcode);
@@ -191,12 +162,8 @@ class _L1BoxScanPageState extends State<L1BoxScanPage> {
       _clearScanFieldAndSetFocus();
       await _vibrateOnError();
       await _playSound('music/badread.wav');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Barcode "$trimmedBarcode" already scanned'),
-          backgroundColor: Colors.orange,
-        ),
-      );
+      _showSnackBar(
+          'Barcode "$trimmedBarcode" already scanned', AppTheme.warning);
     }
   }
 
@@ -223,16 +190,36 @@ class _L1BoxScanPageState extends State<L1BoxScanPage> {
     final shouldPop = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Discard Changes?'),
+        shape: RoundedRectangleBorder(borderRadius: AppTheme.borderRadiusLG),
+        title: Row(
+          children: [
+            Container(
+              padding: AppTheme.paddingSM,
+              decoration: BoxDecoration(
+                color: AppTheme.warningSurface,
+                borderRadius: AppTheme.borderRadiusSM,
+              ),
+              child: const Icon(Icons.warning_amber_rounded,
+                  color: AppTheme.warning),
+            ),
+            const SizedBox(width: AppTheme.spaceMD),
+            const Text('Discard Changes?'),
+          ],
+        ),
         content: const Text(
             'You have unsaved scanned barcodes. Do you want to discard them and leave?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
+            child:
+                Text('Cancel', style: TextStyle(color: AppTheme.textSecondary)),
           ),
-          TextButton(
+          ElevatedButton(
             onPressed: () => Navigator.of(context).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.warning,
+              foregroundColor: Colors.white,
+            ),
             child: const Text('Discard'),
           ),
         ],
@@ -244,214 +231,466 @@ class _L1BoxScanPageState extends State<L1BoxScanPage> {
   Future<void> _handleSave() async {
     if (_isSaving) return;
     if (_scannedCount != _targetCases) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-              'Please scan all $_targetCases cases before saving (currently $_scannedCount)'),
-          backgroundColor: Colors.redAccent,
-        ),
+      _showSnackBar(
+        'Please scan all $_targetCases cases before saving (currently $_scannedCount)',
+        AppTheme.error,
       );
       return;
     }
 
     final loadingSheetId = widget.loadingSheetData['id'];
     if (loadingSheetId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Error: Loading Sheet ID not found'),
-          backgroundColor: Colors.redAccent,
-        ),
-      );
+      _showSnackBar('Error: Loading Sheet ID not found', AppTheme.error);
       return;
     }
 
     setState(() => _isSaving = true);
 
     try {
-      // Save all barcodes in a single transaction if possible
       for (String barcode in _scannedBarcodes) {
         await DBHandler.insertLoadingCase(loadingSheetId, barcode);
       }
 
       await DBHandler.updateLoadingSheetCompleteFlag(loadingSheetId, 1);
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Loading saved successfully!'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      _showSnackBar('Loading saved successfully!', AppTheme.success);
 
       if (mounted) {
-        Navigator.pop(context, true); // Return success flag
+        Navigator.pop(context, true);
       }
     } catch (e) {
       debugPrint('Error saving loading: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error saving: ${e.toString()}'),
-          backgroundColor: Colors.redAccent,
-        ),
-      );
+      _showSnackBar('Error saving: ${e.toString()}', AppTheme.error);
     } finally {
       if (mounted) {
         setState(() => _isSaving = false);
       }
     }
   }
+  // ============ END BUSINESS LOGIC ============
+
+  void _showSnackBar(String message, Color color) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(
+              color == AppTheme.success
+                  ? Icons.check_circle
+                  : color == AppTheme.warning
+                      ? Icons.warning
+                      : Icons.error_outline,
+              color: Colors.white,
+            ),
+            const SizedBox(width: AppTheme.spaceSM),
+            Expanded(child: Text(message)),
+          ],
+        ),
+        backgroundColor: color,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: AppTheme.borderRadiusMD),
+        margin: AppTheme.paddingMD,
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final loadingSheetId = widget.loadingSheetData['id'];
+    // loadingSheetId available from widget.loadingSheetData['id'] if needed
+    final progress = _targetCases > 0 ? _scannedCount / _targetCases : 0.0;
+    final isComplete = _scannedCount == _targetCases;
 
-    return WillPopScope(
-      onWillPop: _onWillPop,
-      child: Scaffold(
-        appBar: GFAppBar(
-          title: Text(
-            'Scan L1 Boxes for Loading Sheet ${loadingSheetId ?? 'N/A'}',
-            style: const TextStyle(color: Colors.white, fontSize: 20),
-          ),
-          backgroundColor: Colors.purple[800],
-          iconTheme: const IconThemeData(color: Colors.white),
+    if (_isLoadingInitialData) {
+      return Scaffold(
+        appBar: CustomAppBar(
+          title: 'L1 Box Scanning',
+          backgroundColor: AppTheme.moduleMagazine,
         ),
-        body: _isLoadingInitialData
-            ? const Center(child: CircularProgressIndicator())
-            : Stack(
-                children: [
-                  Container(
-                    decoration: const BoxDecoration(
-                      image: DecorationImage(
-                        image: AssetImage(
-                            'assets/images/pexels-hngstrm-1939485.jpg'),
-                        fit: BoxFit.cover,
-                      ),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    return PopScope(
+      canPop: !_hasUnsavedChanges,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (!didPop) {
+          final shouldPop = await _onWillPop();
+          if (shouldPop && mounted) {
+            Navigator.of(context).pop();
+          }
+        }
+      },
+      child: Scaffold(
+        resizeToAvoidBottomInset: true,
+        appBar: CustomAppBar(
+          title: 'L1 Box Scanning',
+          backgroundColor: AppTheme.moduleMagazine,
+        ),
+        body: GradientBackground(
+          child: SafeArea(
+            child: Column(
+              children: [
+                // Progress Bar
+                Container(
+                  height: 4,
+                  child: LinearProgressIndicator(
+                    value: progress,
+                    backgroundColor: AppTheme.backgroundAlt,
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      isComplete ? AppTheme.success : AppTheme.moduleMagazine,
                     ),
                   ),
-                  Padding(
-                    padding: const EdgeInsets.all(5.0),
+                ),
+
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: AppTheme.paddingMD,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Card(
-                          elevation: 2,
-                          child: Padding(
-                            padding: const EdgeInsets.all(8.0),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                    'Truck No: ${widget.loadingSheetData['truckno'] ?? 'N/A'}'),
-                                Text(
-                                    'T Name: ${widget.loadingSheetData['tname'] ?? 'N/A'}'),
-                                Text(
-                                    'Brand Id: ${widget.loadingSheetData['bid'] ?? 'N/A'} (${widget.loadingSheetData['bname'] ?? 'N/A'})'),
-                                Text(
-                                    'Product: ${widget.loadingSheetData['product'] ?? 'N/A'}'),
-                                Text('Target Cases: $_targetCases'),
-                                Text('Scanned Cases: $_scannedCount'),
-                              ],
-                            ),
-                          ),
+                        // Header Card with Sheet Details
+                        _buildDetailsCard(),
+                        const SizedBox(height: AppTheme.spaceMD),
+
+                        // Progress Stats
+                        _buildProgressStats(isComplete),
+                        const SizedBox(height: AppTheme.spaceMD),
+
+                        // Scan Input
+                        _buildScanInput(),
+                        const SizedBox(height: AppTheme.spaceMD),
+
+                        // Scanned List (with fixed height)
+                        SizedBox(
+                          height: 250,
+                          child: _buildScannedList(),
                         ),
-                        Card(
-                          elevation: 2,
-                          child: Padding(
-                            padding: const EdgeInsets.all(8.0),
-                            child: TextField(
-                              controller: _scanController,
-                              focusNode: _scanFocusNode,
-                              inputFormatters: [
-                                LengthLimitingTextInputFormatter(27),
-                              ],
-                              decoration: InputDecoration(
-                                hintText: 'Scan L1 Box Barcode (27 digits)',
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                suffixIcon: IconButton(
-                                  icon: const Icon(Icons.qr_code_scanner),
-                                  onPressed: () {
-                                    // TODO: Implement QR scanning
-                                  },
-                                ),
-                              ),
-                              onSubmitted: _handleScan,
-                              textInputAction: TextInputAction.done,
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          child: Card(
-                            elevation: 2,
-                            child: _scannedBarcodes.isEmpty
-                                ? const Center(
-                                    child: Text('No barcodes scanned yet'),
-                                  )
-                                : ListView.builder(
-                                    itemCount: _scannedBarcodes.length,
-                                    itemBuilder: (context, index) {
-                                      final barcode = _scannedBarcodes[index];
-                                      return ListTile(
-                                        title: Text(
-                                          barcode,
-                                          style: const TextStyle(fontSize: 14),
-                                        ),
-                                        trailing: IconButton(
-                                          icon: const Icon(
-                                              Icons.remove_circle_outline,
-                                              color: Colors.red),
-                                          onPressed: () =>
-                                              _removeBarcode(barcode),
-                                        ),
-                                        dense: true,
-                                      );
-                                    },
-                                  ),
-                          ),
-                        ),
-                        const SizedBox(height: 60), // Space for save button
                       ],
                     ),
                   ),
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: ElevatedButton.icon(
-                        onPressed: _scannedCount == _targetCases && !_isSaving
-                            ? _handleSave
-                            : null,
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 15),
-                          backgroundColor: _scannedCount == _targetCases
-                              ? Colors.green
-                              : Colors.grey,
-                        ),
-                        icon: _isSaving
-                            ? const SizedBox(
-                                width: 24,
-                                height: 24,
-                                child: CircularProgressIndicator(
-                                  color: Colors.white,
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.save, size: 24),
-                        label: Text(
-                          _isSaving
-                              ? 'Saving...'
-                              : 'Save ($_scannedCount/$_targetCases)',
-                          style: const TextStyle(fontSize: 18),
+                ),
+                // Save Button - fixed at bottom
+                Padding(
+                  padding: AppTheme.paddingMD,
+                  child: _buildSaveButton(isComplete),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDetailsCard() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: AppTheme.borderRadiusMD,
+        boxShadow: AppTheme.shadowSM,
+      ),
+      child: Column(
+        children: [
+          Container(
+            padding: AppTheme.paddingMD,
+            decoration: BoxDecoration(
+              gradient: AppTheme.moduleGradient(AppTheme.moduleMagazine),
+              borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(AppTheme.radiusMD)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.assignment_rounded,
+                    color: Colors.white, size: 20),
+                const SizedBox(width: AppTheme.spaceSM),
+                Text(
+                  'Loading Sheet #${widget.loadingSheetData['id'] ?? 'N/A'}',
+                  style: AppTheme.titleSmall.copyWith(color: Colors.white),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: AppTheme.paddingMD,
+            child: Column(
+              children: [
+                _buildDetailRow(
+                    'Truck No',
+                    widget.loadingSheetData['truckno'] ?? 'N/A',
+                    Icons.local_shipping),
+                _buildDetailRow('Transporter',
+                    widget.loadingSheetData['tname'] ?? 'N/A', Icons.business),
+                _buildDetailRow(
+                    'Brand',
+                    '${widget.loadingSheetData['bid'] ?? 'N/A'} - ${widget.loadingSheetData['bname'] ?? 'N/A'}',
+                    Icons.inventory),
+                _buildDetailRow(
+                    'Product',
+                    widget.loadingSheetData['product'] ?? 'N/A',
+                    Icons.category),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDetailRow(String label, String value, IconData icon) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppTheme.spaceXS),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: AppTheme.textTertiary),
+          const SizedBox(width: AppTheme.spaceSM),
+          SizedBox(
+            width: 80,
+            child: Text(label, style: AppTheme.labelSmall),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: AppTheme.bodySmall.copyWith(fontWeight: FontWeight.w500),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProgressStats(bool isComplete) {
+    return Row(
+      children: [
+        Expanded(
+          child: StatCard(
+            title: 'Scanned',
+            value: '$_scannedCount',
+            color: isComplete ? AppTheme.success : AppTheme.info,
+            icon: Icons.qr_code_scanner,
+            compact: true,
+          ),
+        ),
+        const SizedBox(width: AppTheme.spaceMD),
+        Expanded(
+          child: StatCard(
+            title: 'Target',
+            value: '$_targetCases',
+            color: AppTheme.moduleMagazine,
+            icon: Icons.flag_rounded,
+            compact: true,
+          ),
+        ),
+        const SizedBox(width: AppTheme.spaceMD),
+        Expanded(
+          child: StatCard(
+            title: 'Remaining',
+            value: '${_targetCases - _scannedCount}',
+            color: (_targetCases - _scannedCount) > 0
+                ? AppTheme.warning
+                : AppTheme.success,
+            icon: Icons.pending_actions,
+            compact: true,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildScanInput() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: AppTheme.borderRadiusMD,
+        boxShadow: AppTheme.shadowSM,
+      ),
+      padding: AppTheme.paddingMD,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.qr_code_scanner,
+                  size: 18, color: AppTheme.moduleMagazine),
+              const SizedBox(width: AppTheme.spaceSM),
+              Text('Scan Barcode', style: AppTheme.titleSmall),
+            ],
+          ),
+          const SizedBox(height: AppTheme.spaceMD),
+          TextField(
+            controller: _scanController,
+            focusNode: _scanFocusNode,
+            inputFormatters: [LengthLimitingTextInputFormatter(27)],
+            style: AppTheme.bodyMedium,
+            decoration: InputDecoration(
+              hintText: 'Scan or enter L1 Box Barcode (27 digits)',
+              prefixIcon: const Icon(Icons.document_scanner_outlined),
+              suffixIcon: Container(
+                margin: const EdgeInsets.all(AppTheme.spaceXS),
+                decoration: BoxDecoration(
+                  color: AppTheme.moduleMagazine.withOpacity(0.1),
+                  borderRadius: AppTheme.borderRadiusSM,
+                ),
+                child: IconButton(
+                  icon: Icon(Icons.qr_code_scanner,
+                      color: AppTheme.moduleMagazine),
+                  onPressed: () {
+                    // TODO: Implement QR code scanning
+                  },
+                ),
+              ),
+              filled: true,
+              fillColor: AppTheme.surfaceVariant,
+              border: OutlineInputBorder(
+                borderRadius: AppTheme.borderRadiusMD,
+                borderSide: BorderSide.none,
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: AppTheme.borderRadiusMD,
+                borderSide:
+                    BorderSide(color: AppTheme.moduleMagazine, width: 2),
+              ),
+              contentPadding: AppTheme.paddingMD,
+            ),
+            onSubmitted: _handleScan,
+            textInputAction: TextInputAction.done,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildScannedList() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: AppTheme.borderRadiusMD,
+        boxShadow: AppTheme.shadowSM,
+      ),
+      child: Column(
+        children: [
+          Container(
+            padding: AppTheme.paddingMD,
+            decoration: BoxDecoration(
+              color: AppTheme.surfaceVariant,
+              borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(AppTheme.radiusMD)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Flexible(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.list_alt,
+                          size: 18, color: AppTheme.textSecondary),
+                      const SizedBox(width: AppTheme.spaceSM),
+                      Flexible(
+                        child: Text(
+                          'Scanned Barcodes',
+                          style: AppTheme.titleSmall,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppTheme.spaceMD,
+                    vertical: AppTheme.spaceXS,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppTheme.moduleMagazine.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(AppTheme.radiusCircle),
+                  ),
+                  child: Text(
+                    '${_scannedBarcodes.length}',
+                    style: AppTheme.labelMedium.copyWith(
+                      color: AppTheme.moduleMagazine,
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: _scannedBarcodes.isEmpty
+                ? EmptyState(
+                    message:
+                        'No barcodes scanned yet.\nScan a barcode to get started.',
+                    icon: Icons.qr_code_2_rounded,
+                  )
+                : ListView.builder(
+                    padding: AppTheme.paddingXS,
+                    itemCount: _scannedBarcodes.length,
+                    itemBuilder: (context, index) {
+                      final barcode = _scannedBarcodes[index];
+                      return Container(
+                        margin: const EdgeInsets.symmetric(
+                          horizontal: AppTheme.spaceXS,
+                          vertical: AppTheme.spaceXXS,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppTheme.surface,
+                          borderRadius: AppTheme.borderRadiusSM,
+                          border: Border.all(color: AppTheme.backgroundAlt),
+                        ),
+                        child: ListTile(
+                          dense: true,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: AppTheme.spaceMD,
+                            vertical: 0,
+                          ),
+                          leading: Container(
+                            width: 28,
+                            height: 28,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: AppTheme.moduleMagazine.withOpacity(0.1),
+                              borderRadius: AppTheme.borderRadiusSM,
+                            ),
+                            child: Text(
+                              '${index + 1}',
+                              style: AppTheme.labelSmall.copyWith(
+                                color: AppTheme.moduleMagazine,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          title: Text(
+                            barcode,
+                            style: AppTheme.bodySmall.copyWith(
+                              fontFamily: 'monospace',
+                            ),
+                          ),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.remove_circle_outline,
+                                color: AppTheme.error, size: 20),
+                            onPressed: () => _removeBarcode(barcode),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
       ),
+    );
+  }
+
+  Widget _buildSaveButton(bool isComplete) {
+    return PrimaryButton(
+      text: _isSaving
+          ? 'Saving...'
+          : 'Save Loading ($_scannedCount/$_targetCases)',
+      icon: Icons.save_rounded,
+      onPressed: isComplete && !_isSaving ? _handleSave : null,
+      isLoading: _isSaving,
+      backgroundColor: isComplete ? AppTheme.success : AppTheme.backgroundAlt,
+      foregroundColor: isComplete ? Colors.white : AppTheme.textTertiary,
     );
   }
 }
